@@ -26,6 +26,7 @@ AExiaCharacterBase::AExiaCharacterBase()
 	
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
+	JumpMaxHoldTime = 0.5f;
 }
 
 // Called when the game starts or when spawned
@@ -67,6 +68,37 @@ void AExiaCharacterBase::LoadCharacterData()
 	}
 }
 
+void AExiaCharacterBase::StartFlying()
+{
+	if (GetCharacterMovement())
+	{
+		// 비행 시작
+		GetCharacterMovement()->GravityScale = FlightGravityScale;
+		
+		// 공중에서 즉시 멈칫하는 현상을 방지하기 위해 속도 제동 보정
+		//GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
+	}
+}
+
+void AExiaCharacterBase::UpdateFlight(float DeltaTime)
+{
+	//비행 중 지속적으로 상승 힘 가하기
+	FVector BoostForce = FVector::UpVector * JumpBoostForce;
+	GetCharacterMovement()->AddForce(BoostForce);
+	
+	//연료 소모 로직 들어갈 자리 아직 미구현
+}
+
+
+void AExiaCharacterBase::StopFlying()
+{	
+	// 비행 종료 시 중력 원상 복구
+	GetCharacterMovement()->GravityScale = DefaultGravityScale;
+	
+	// 낙하 시 기본 제동 수치로 복구
+	GetCharacterMovement()->BrakingDecelerationFalling = 0.0f;
+}
+
 float AExiaCharacterBase::GetHPPercent_Implementation() const
 {
 	return (CurrentStat.MaxHP > 0) ? (1.0f) : 0.0f; //현재 HP로직 추가 전 임시 반환
@@ -91,11 +123,126 @@ void AExiaCharacterBase::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
 	{
-		// LookAction과 Look함수를 바인드
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Look);
+		if (JumpAction)
+		{
+			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartJumpBoost);
+			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::JumpBoosting);
+			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopJumpBoost);
+		}
+		
+		if (BoostAction)
+		{
+			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartBoost);
+			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Boosting);
+			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopBoost);
+		}
+
+		// 이동 바인딩 ( 2026-01-19 이동이 안되던 문제는 해당 로직의 누락으로 확인되어 2026-01-20 오전에 해당 로직을 추가하여 해결되었음. )
+		if (MoveAction)
+		{
+			EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Move);
+		}
+
+		// 회전 바인딩
+		if (LookAction)
+		{
+			EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Look);
+		}
 	}
 }
 
+void AExiaCharacterBase::SetCombatState(EGundamCombatState NewState)
+{
+	CombatState = NewState;
+	
+	if (CombatState == EGundamCombatState::Combat)
+	{
+		// 전투 상태 : 카메라를 대상에게 고정한 상태로 이동
+		bUseControllerRotationYaw = true;
+		GetCharacterMovement()->bOrientRotationToMovement = false;
+	}
+	else
+	{
+		// 비전투 상태 : 이동 방향으로 몸 회전
+		bUseControllerRotationYaw = false;
+		GetCharacterMovement()->bOrientRotationToMovement = true;
+	}
+}
+
+void AExiaCharacterBase::StartJumpBoost()
+{
+	// 짧게 누를때 대응
+	Jump(); 
+	bIsJumpBoosting = true;
+}
+
+void AExiaCharacterBase::JumpBoosting()
+{
+	if (!bIsJumpBoosting) return;
+	// 길게 누를때 대응
+	if (bIsJumpBoosting && GetCharacterMovement()->IsFalling())
+	{
+		FVector JumpForce = FVector::UpVector * JumpBoostForce;
+		GetCharacterMovement()->AddForce(JumpForce);
+        
+		// GN 입자 소모 로직 호출
+		float DeltaTime = GetWorld()->GetDeltaSeconds();
+		ConsumeGNParticles(DeltaTime); 
+		
+		GetCharacterMovement()->MaxAcceleration = 5000.0f;
+	}
+}
+
+void AExiaCharacterBase::StopJumpBoost()
+{
+	//키를 떼면 점프 중단 및 부스트 상태 해제
+	StopJumping();
+	bIsJumpBoosting = false;
+}
+
+void AExiaCharacterBase::StartBoost()
+{
+	bIsBoosting = true;
+	
+	// [짧게 누르기 대응] 즉각적인 반응 필요
+	if (GetCharacterMovement()->IsFalling())
+	{
+		LaunchCharacter(FVector(0,0, VerticalBoostForce), false, true);
+	}
+	
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
+	GetCharacterMovement()->MaxAcceleration = 5000.0f;
+}
+
+void AExiaCharacterBase::Boosting()
+{
+	if (!bIsBoosting) return;
+	
+	// [길게 누르기 대응] 누르고 있는 동안 매 프레임 실행
+	if (GetCharacterMovement()->IsFalling())
+	{
+		//공중 부스트 - 점프 부스트기준
+		GetCharacterMovement()->AddInputVector(FVector::UpVector * 1.5f);
+	}
+	
+	// GN입자 실시간 소모
+	float DeltaTime = GetWorld()->GetDeltaSeconds();
+	ConsumeGNParticles(DeltaTime);
+}
+
+void AExiaCharacterBase::StopBoost()
+{
+	bIsBoosting = false;
+	
+	//속도 원복
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+}
+
+void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
+{
+	//d 추후 데이터 테이블의 CurrentGNParticles의 값을 깍는 로직이 들어갈 자리
+	if (CurrentStat.MaxGNParticles <= 0) StopBoost();
+}
 
 void AExiaCharacterBase::Move(const FInputActionValue& Value)
 {
