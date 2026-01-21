@@ -28,11 +28,15 @@
 			"Enabled": true
 		},
 		{
+			"Name": "MotionWarping",
+			"Enabled": true
+		},
+		{
 			"Name": "GameplayStateTree",
 			"Enabled": true
 		},
 		{
-			"Name": "MotionWarping",
+			"Name": "GameplayBehaviors",
 			"Enabled": true
 		}
 	]

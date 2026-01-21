@@ -1,12 +1,10 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
-
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "GundamInterfaces.h" // 인터페이스 포함
 #include "GundamDataStructs.h" // 구조체 포함
 #include "InputActionValue.h"
+#include "ExiaAnimInstance.h"
 #include "ExiaCharacterBase.generated.h"
 
 UENUM(Blueprintable)
@@ -72,9 +70,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat")
 	float JumpBoostForce = 110000.0f; // 상승 추력
 	
+public:
+	FORCEINLINE bool IsBoosting() const { return bIsBoosting; }
 	//상태 변수
+	
+protected:
 	bool bIsBoosting = false;
 	bool bIsJumpBoosting = false;
+	
+	// 사용자가 부스트 키(Shift)를 누르고 있는지 여부
+	bool bIsBoostKeyDown = false;
 	
 	//점프 부스트 관련 함수 정의
 	void StartJumpBoost(); // Started

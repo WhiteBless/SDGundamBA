@@ -113,7 +113,10 @@ float AExiaCharacterBase::GetGNParticlePercent_Implementation() const
 void AExiaCharacterBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
+	
+	// // 이동 입력이 있고 + 부스트 키가 눌려있을 때만 bIsBoosting을 참으로 유지
+	// bool bHasInput = GetLastMovementInputVector().Size() > 0.0f;
+	// bIsBoosting = bIsBoostKeyDown && bHasInput; 
 }
 
 // Called to bind functionality to input
@@ -202,16 +205,22 @@ void AExiaCharacterBase::StopJumpBoost()
 
 void AExiaCharacterBase::StartBoost()
 {
+	// 이동 입력 가져오기
+	FVector InputDir = GetLastMovementInputVector();
+	
+	// 아무 키도 눌리지 않았다면 부스트를 실행하지 않음.
+	if (InputDir.IsNearlyZero()) return;
+	
 	bIsBoosting = true;
 	
+	FVector LaunchDir = GetLastMovementInputVector().GetSafeNormal();
+	GetCharacterMovement()->RotationRate = FRotator(0,0,0);
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
 	// [짧게 누르기 대응] 즉각적인 반응 필요
 	if (GetCharacterMovement()->IsFalling())
 	{
-		LaunchCharacter(FVector(0,0, VerticalBoostForce), false, true);
+		LaunchCharacter(LaunchDir.GetSafeNormal() * 1000.0f, true, false);
 	}
-	
-	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
-	GetCharacterMovement()->MaxAcceleration = 5000.0f;
 }
 
 void AExiaCharacterBase::Boosting()
@@ -233,8 +242,10 @@ void AExiaCharacterBase::Boosting()
 void AExiaCharacterBase::StopBoost()
 {
 	bIsBoosting = false;
-	
+
 	//속도 원복
+	GetCharacterMovement()->RotationRate = FRotator(0,180.0f,0);
+	
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 }
 
