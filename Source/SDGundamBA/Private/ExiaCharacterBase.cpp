@@ -213,6 +213,8 @@ void AExiaCharacterBase::StartBoost()
 	
 	bIsBoosting = true;
 	
+	bUseControllerRotationYaw = true;
+	
 	FVector LaunchDir = GetLastMovementInputVector().GetSafeNormal();
 	GetCharacterMovement()->RotationRate = FRotator(0,0,0);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
@@ -243,6 +245,7 @@ void AExiaCharacterBase::StopBoost()
 {
 	bIsBoosting = false;
 
+	bUseControllerRotationYaw = false;
 	//속도 원복
 	GetCharacterMovement()->RotationRate = FRotator(0,180.0f,0);
 	

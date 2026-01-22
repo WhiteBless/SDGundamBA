@@ -22,4 +22,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	bool bIsBoosting;
 	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	float LastDashForward;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	float LastDashRight;
 };

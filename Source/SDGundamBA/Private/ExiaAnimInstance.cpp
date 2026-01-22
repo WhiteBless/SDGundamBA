@@ -33,5 +33,15 @@ void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			LocalVelocityForward = FMath::FInterpTo(LocalVelocityForward, TargetForward, DeltaSeconds, 10.0f);
 			LocalVelocityRight = FMath::FInterpTo(LocalVelocityRight, TargetRight, DeltaSeconds, 10.0f);
 		}
+		
+		if (bIsBoosting)
+		{
+			FVector CurrentInput = Character->GetLastMovementInputVector();
+			if (CurrentInput.Size() >= 0.2f)
+			{
+				LastDashForward = LocalVelocityForward;
+				LastDashRight = LocalVelocityRight;
+			}
+		}
 	}
 }
