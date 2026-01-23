@@ -35,6 +35,9 @@ void AExiaCharacterBase::BeginPlay()
 	Super::BeginPlay();
 	LoadCharacterData();
 	
+	GetCharacterMovement()->JumpZVelocity = 900.f;
+	GetCharacterMovement()->GravityScale = 4.5f;
+	
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -73,11 +76,40 @@ void AExiaCharacterBase::StartFlying()
 	if (GetCharacterMovement())
 	{
 		// 비행 시작
-		GetCharacterMovement()->GravityScale = FlightGravityScale;
+		GetCharacterMovement()->GravityScale = FlightGravityScale + 2.0f;
 		
 		// 공중에서 즉시 멈칫하는 현상을 방지하기 위해 속도 제동 보정
 		//GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
 	}
+}
+
+void AExiaCharacterBase::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+	
+	bIsJumping = false;
+	bHasJumped = false;
+	bHasJumpDashUsed = false;
+	bCanJump = false;
+	
+	if (bIsJumpBoosting)
+	{
+		StopJumpDash();
+	}
+	
+	GetCharacterMovement()->DisableMovement(); // 잠시 멈춤
+	GetWorldTimerManager().SetTimer(LandingTimerHandle, this, &AExiaCharacterBase::EnableMovementCustom, 0.1f, false);
+}
+
+void AExiaCharacterBase::ResetJumpLock()
+{
+	bCanJump = true;
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+void AExiaCharacterBase::EnableMovementCustom()
+{
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 }
 
 void AExiaCharacterBase::UpdateFlight(float DeltaTime)
@@ -117,6 +149,17 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 	// // 이동 입력이 있고 + 부스트 키가 눌려있을 때만 bIsBoosting을 참으로 유지
 	// bool bHasInput = GetLastMovementInputVector().Size() > 0.0f;
 	// bIsBoosting = bIsBoostKeyDown && bHasInput; 
+	
+	if (bIsJumpBoosting)
+	{
+		FVector CurrentVel = GetCharacterMovement()->Velocity;
+		
+		if (CurrentVel.Z < -100.0f)
+		{
+			CurrentVel.Z = -100.0f;
+			GetCharacterMovement()->Velocity = CurrentVel;
+		}
+	}
 }
 
 // Called to bind functionality to input
@@ -203,6 +246,56 @@ void AExiaCharacterBase::StopJumpBoost()
 	bIsJumpBoosting = false;
 }
 
+void AExiaCharacterBase::Jump()
+{
+	Super::Jump();
+	
+	if (!bCanJump || GetCharacterMovement()->IsFalling()) 
+	{
+		return; 
+	}
+	bCanJump = false;
+	bIsJumping = true;
+	
+	if (bCanJump && !GetCharacterMovement()->IsFalling() && !bHasJumped)
+	{
+
+		FVector JumpDir = GetLastMovementInputVector();
+		float JumpUpForce = 800.f;
+		float JumpForwardForce = 400.f;
+		
+		FVector LaunchVel = (JumpDir * JumpForwardForce) + FVector(0,0, JumpUpForce);
+		LaunchCharacter(LaunchVel, false, true);
+	}
+	else if (GetCharacterMovement()->IsFalling() && !bHasJumped)
+	{
+		StartJumpDash();
+		bHasJumpDashUsed = true;
+	}
+}
+
+void AExiaCharacterBase::StartJumpDash()
+{
+	if (!bIsJumpBoosting)
+	{
+		bIsJumpBoosting = true;
+		
+		GetCharacterMovement()->GravityScale = 0.00000000001f;
+		GetCharacterMovement()->AirControl = 0.8f;
+		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
+		
+	}
+}
+
+void AExiaCharacterBase::StopJumpDash()
+{
+	bIsJumpBoosting = false;
+	bIsJumping = false;
+	
+	GetCharacterMovement()->GravityScale = 2.0f;
+	GetCharacterMovement()->AirControl = 0.05f;
+}
+
 void AExiaCharacterBase::StartBoost()
 {
 	// 이동 입력 가져오기
@@ -261,11 +354,13 @@ void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
 void AExiaCharacterBase::Move(const FInputActionValue& Value)
 {
 	FVector2D MovementVector = Value.Get<FVector2D>();
+	
+	if (bIsBraking) return;
 
 	// 디버그용
 	UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
 	
-	if (Controller != nullptr)
+	if (Controller != nullptr != 0.0f)
 	{
 		// 컨트롤러의 회전 방향
 		const FRotator Rotation = Controller->GetControlRotation();
@@ -294,4 +389,22 @@ void AExiaCharacterBase::Look(const FInputActionValue& Value)
 		//마우스 상하 움직임
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
+}
+
+void AExiaCharacterBase::StartBraking()
+{
+	// 감속력을 높이기
+	GetCharacterMovement()->BrakingDecelerationWalking = 10000.0f;
+	GetCharacterMovement()->GroundFriction = 10.0f;
+	
+	// 이동속도를 일시적으로 낮추기
+	GetCharacterMovement()->MaxWalkSpeed = 2.0f;
+}
+
+void AExiaCharacterBase::StopBraking()
+{
+	// 원래 수치 복구
+	GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
+	GetCharacterMovement()->GroundFriction = 8.0f;
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 }

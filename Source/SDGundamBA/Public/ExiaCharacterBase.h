@@ -74,18 +74,34 @@ public:
 	FORCEINLINE bool IsBoosting() const { return bIsBoosting; }
 	//상태 변수
 	
+	bool bIsJumping;
+	
+	// 점프 가능 여부 (착지 후 딜레이용)
+	bool bCanJump = true;
+	
 protected:
 	bool bIsBoosting = false;
 	bool bIsJumpBoosting = false;
 	
+	FTimerHandle LandingTimerHandle;
+	
+	void EnableMovementCustom();
+	
 	// 사용자가 부스트 키(Shift)를 누르고 있는지 여부
 	bool bIsBoostKeyDown = false;
+
+	// 점프 가능 상태로 복구하는 함수
+	void ResetJumpLock();
 	
 	//점프 부스트 관련 함수 정의
 	void StartJumpBoost(); // Started
 	void JumpBoosting();  // Triggered (상승 유지)
 	void StopJumpBoost();  // Completed
 	
+	void Jump();
+	void StartJumpDash();
+	void StopJumpDash();
+
 	//부스트 관련 함수 정의
 	void StartBoost();	//누르기 시작
 	void Boosting();	// 누르는 도중
@@ -104,6 +120,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Movement")
 	float RightVelocity;\
 	
+public:
+	// 제동 관련 선언
+	void StartBraking();
+	void StopBraking();
+
+	bool bIsBraking;
+	
 protected:
 	// 비행 중 적용할 중력 값
 	UPROPERTY(EditAnywhere, Category = "Movement")
@@ -114,6 +137,12 @@ protected:
 	
 	void StartFlying();
 	void StopFlying();
+	
+	//점프 중 중복 점프가 안돼도록 판단하기 위해 선언
+	bool bHasJumped = false;
+	bool bHasJumpDashUsed = false;
+	
+	virtual void Landed(const FHitResult& Hit) override;
 	
 	// 매 프레임 연료 체크 및 추력 적용
 	void UpdateFlight(float DeltaTime);

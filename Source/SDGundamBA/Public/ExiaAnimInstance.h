@@ -27,4 +27,16 @@ public:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	float LastDashRight;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	bool bIsFalling; // 공중에 떠 있는지 여부 (점프/추락 포함)
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	bool bIsJumping; // 점프 버튼이 눌렸는지 여부
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	bool bCanJump;
+	
+public:
+	bool bIsAscending;
 };

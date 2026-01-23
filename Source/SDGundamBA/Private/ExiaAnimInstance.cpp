@@ -3,11 +3,19 @@
 
 #include "ExiaAnimInstance.h"
 #include "ExiaCharacterBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
-
+	
+	if (auto* ExiaChar = Cast<AExiaCharacterBase>(TryGetPawnOwner()))
+	{
+		// IsFalling()은 무브먼트 컴포넌트가 자동으로 계산해주는 물리 상태
+		bIsFalling = ExiaChar->GetCharacterMovement()->IsFalling();
+		bIsJumping = ExiaChar->bIsJumping;
+	}
+	
 	auto Pawn = TryGetPawnOwner();
 	if (IsValid(Pawn))
 	{
@@ -22,7 +30,7 @@ void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			FVector Velocity = Pawn->GetVelocity();
 			FRotator Rotation = Pawn->GetActorRotation();
         
-			// [핵심] 입력 방향을 로컬 좌표로 변환 (S를 누르면 즉시 X가 -1이 됨)
+			// 입력 방향을 로컬 좌표로 변환 (S를 누르면 즉시 X가 -1이 됨)
 			FVector LocalInput = Rotation.UnrotateVector(InputVector);
 		
 	
@@ -32,6 +40,15 @@ void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 			float TargetRight = LocalInput.Y * DashSpeed;
 			LocalVelocityForward = FMath::FInterpTo(LocalVelocityForward, TargetForward, DeltaSeconds, 10.0f);
 			LocalVelocityRight = FMath::FInterpTo(LocalVelocityRight, TargetRight, DeltaSeconds, 10.0f);
+		}
+		
+		if (auto* ExiaChar = Cast<AExiaCharacterBase>(TryGetPawnOwner()))
+		{
+			bCanJump = ExiaChar->bCanJump; 
+			bIsJumping = ExiaChar->bIsJumping;
+			bIsFalling = ExiaChar->GetCharacterMovement()->IsFalling();
+			bIsAscending = Character->GetVelocity().Z > 10.f; 
+
 		}
 		
 		if (bIsBoosting)
