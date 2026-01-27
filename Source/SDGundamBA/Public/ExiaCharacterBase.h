@@ -118,7 +118,7 @@ protected:
 	float ForwardVelocity;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Movement")
-	float RightVelocity;\
+	float RightVelocity;
 	
 public:
 	// 제동 관련 선언
@@ -128,6 +128,10 @@ public:
 	bool bIsBraking;
 	
 protected:
+	// 가드 상태 정의
+	UPROPERTY(BlueprintReadWrite, Category = "States")
+	bool bBlock;
+	
 	// 비행 중 적용할 중력 값
 	UPROPERTY(EditAnywhere, Category = "Movement")
 	float FlightGravityScale = 0.4f;

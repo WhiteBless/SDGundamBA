@@ -250,10 +250,11 @@ void AExiaCharacterBase::Jump()
 {
 	Super::Jump();
 	
-	if (!bCanJump || GetCharacterMovement()->IsFalling()) 
+	if (!bCanJump || GetCharacterMovement()->IsFalling())
 	{
-		return; 
+		return;
 	}
+	
 	bCanJump = false;
 	bIsJumping = true;
 	
@@ -320,7 +321,7 @@ void AExiaCharacterBase::StartBoost()
 
 void AExiaCharacterBase::Boosting()
 {
-	if (!bIsBoosting) return;
+	if (bBlock || !bIsBoosting) return;
 	
 	// [길게 누르기 대응] 누르고 있는 동안 매 프레임 실행
 	if (GetCharacterMovement()->IsFalling())
@@ -355,7 +356,7 @@ void AExiaCharacterBase::Move(const FInputActionValue& Value)
 {
 	FVector2D MovementVector = Value.Get<FVector2D>();
 	
-	if (bIsBraking) return;
+	if (bBlock || bIsBraking) return;
 
 	// 디버그용
 	UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
