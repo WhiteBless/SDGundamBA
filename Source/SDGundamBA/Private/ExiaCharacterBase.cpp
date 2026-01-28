@@ -26,8 +26,9 @@ AExiaCharacterBase::AExiaCharacterBase()
 	
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
-	JumpMaxHoldTime = 0.5f;
+	JumpMaxHoldTime = 0.2f;
 }
+
 
 // Called when the game starts or when spawned
 void AExiaCharacterBase::BeginPlay()
@@ -35,8 +36,8 @@ void AExiaCharacterBase::BeginPlay()
 	Super::BeginPlay();
 	LoadCharacterData();
 	
-	GetCharacterMovement()->JumpZVelocity = 900.f;
-	GetCharacterMovement()->GravityScale = 4.5f;
+	GetCharacterMovement()->JumpZVelocity = 900.f;	// 최대 높이 제한
+	GetCharacterMovement()->GravityScale = 4.5f;	// 시작 시 중력 스케일 설정
 	
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -51,6 +52,24 @@ void AExiaCharacterBase::BeginPlay()
 				UE_LOG(LogTemp, Error, TEXT("DefaultMappingContext가 할당되지 않았습니다!"));
 			}
 		}
+	}
+}
+
+void AExiaCharacterBase::BlockingStateStart()
+{
+	if (bBlock)
+	{
+		GetCharacterMovement()->GravityScale = 20.5f;
+		GetCharacterMovement()->MaxWalkSpeed = 2.0f;
+	}
+}
+
+void AExiaCharacterBase::BlockingStateEnd()
+{
+	if (!bBlock)
+	{
+		GetCharacterMovement()->GravityScale = 4.5f;
+		GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 	}
 }
 
@@ -73,10 +92,12 @@ void AExiaCharacterBase::LoadCharacterData()
 
 void AExiaCharacterBase::StartFlying()
 {
+	if (bBlock) return;
+	
 	if (GetCharacterMovement())
 	{
 		// 비행 시작
-		GetCharacterMovement()->GravityScale = FlightGravityScale + 2.0f;
+		GetCharacterMovement()->GravityScale = FlightGravityScale + 3.0f;
 		
 		// 공중에서 즉시 멈칫하는 현상을 방지하기 위해 속도 제동 보정
 		//GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
@@ -281,7 +302,7 @@ void AExiaCharacterBase::StartJumpDash()
 	{
 		bIsJumpBoosting = true;
 		
-		GetCharacterMovement()->GravityScale = 0.00000000001f;
+		GetCharacterMovement()->GravityScale = 0.00001f;
 		GetCharacterMovement()->AirControl = 0.8f;
 		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
 		

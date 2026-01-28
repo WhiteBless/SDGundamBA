@@ -132,6 +132,10 @@ protected:
 	UPROPERTY(BlueprintReadWrite, Category = "States")
 	bool bBlock;
 	
+	void BlockingStateStart();
+	void BlockingStateEnd();
+	
+	
 	// 비행 중 적용할 중력 값
 	UPROPERTY(EditAnywhere, Category = "Movement")
 	float FlightGravityScale = 0.4f;
