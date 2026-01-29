@@ -14,6 +14,13 @@ void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		// IsFalling()은 무브먼트 컴포넌트가 자동으로 계산해주는 물리 상태
 		bIsFalling = ExiaChar->GetCharacterMovement()->IsFalling();
 		bIsJumping = ExiaChar->bIsJumping;
+		
+		bIsBoosting = ExiaChar->IsBoosting();
+		
+		if (ExiaChar->GetVelocity().Size2D() < 10.0f)
+		{
+			bIsBoosting = false;
+		}
 	}
 	
 	auto Pawn = TryGetPawnOwner();

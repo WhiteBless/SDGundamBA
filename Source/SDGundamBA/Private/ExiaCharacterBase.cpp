@@ -181,6 +181,19 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 			GetCharacterMovement()->Velocity = CurrentVel;
 		}
 	}
+	
+	if (GetCharacterMovement()->IsFalling() && bIsBoosting)
+	{
+		GetCharacterMovement()->AirControl = 2.0f;
+		
+		// 마찰력 증가 값
+		GetCharacterMovement()->BrakingDecelerationFalling = 2000.0f;
+	}
+	else
+	{
+		GetCharacterMovement()->AirControl = 0.35f;
+		GetCharacterMovement()->BrakingDecelerationFalling = 500.0f;
+	}
 }
 
 // Called to bind functionality to input
@@ -382,7 +395,7 @@ void AExiaCharacterBase::Move(const FInputActionValue& Value)
 	// 디버그용
 	UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
 	
-	if (Controller != nullptr != 0.0f)
+	if (Controller != nullptr)
 	{
 		// 컨트롤러의 회전 방향
 		const FRotator Rotation = Controller->GetControlRotation();
