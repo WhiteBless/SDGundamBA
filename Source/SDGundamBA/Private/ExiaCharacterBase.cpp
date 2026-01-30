@@ -55,6 +55,38 @@ void AExiaCharacterBase::BeginPlay()
 	}
 }
 
+void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName)
+{
+	IGundamCombatInterface::ApplyGundamDamage_Implementation(DamageAmount, Attacker, HitBoneName);
+
+	if (CurrentHP <= 0.0f) return;
+	
+	if (CurrentHP <= 0.0f)
+	{
+		//TODO 사망판정 로직 작성 예정
+	}
+	
+	if (HitMontage && Attacker)
+	{
+		//TODO 슈퍼아머 로직 (공격중)체크
+		
+		// 공격자의 방향 벡터
+		FVector ToAttacker = Attacker->GetActorLocation() - GetActorLocation();
+		ToAttacker.Normalize();
+		
+		float ForwardDot = FVector::DotProduct(GetActorForwardVector(), ToAttacker);
+		
+		FName SectionName = (ForwardDot >= 0) ? FName("Hit_Front") : FName("Hit_Back");
+
+		// 섹션이 존재하면 재생
+		PlayAnimMontage(HitMontage, 1.0f, SectionName);
+	}
+	
+	// 2. HP 차감 (로그 확인용)
+	CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, MaxHP);
+	UE_LOG(LogTemp, Warning, TEXT("Hit! HP Left: %f"), CurrentHP);
+}
+
 void AExiaCharacterBase::BlockingStateStart()
 {
 	if (bBlock)
@@ -75,16 +107,29 @@ void AExiaCharacterBase::BlockingStateEnd()
 
 void AExiaCharacterBase::LoadCharacterData()
 {
+	if (CharacterDataTable == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CharacterDataTable is missing!"));
+		return;
+	}
+	
 	if (StatDataTable)
 	{
-		static const FString ContextString(TEXT("Exia Data Context"));
-		FGundamCharacterData* DataRow = StatDataTable->FindRow<FGundamCharacterData>(FName("Exia_R2"), ContextString);
-	
-		if (DataRow)
+		static const FString ContextString(TEXT("Character Data Context"));
+		FGundamCharacterData* CharData = CharacterDataTable->FindRow<FGundamCharacterData>(CharacterRowName, ContextString);
+		// 3. 데이터를 찾았다면 변수에 할당
+		if (CharData)
 		{
-			CurrentStat = *DataRow;
-			GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
-			UE_LOG(LogTemp, Warning, TEXT("Exia Data Loaded : HP = %f"), CurrentStat.MaxHP);
+			// 최대 체력을 데이터 테이블 값으로 설정
+			MaxHP = CharData->MaxHP;
+			CurrentStat = *CharData;
+			// 게임 시작시 체력 회복
+			CurrentHP = MaxHP;
+
+			// 이동 속도나 부스트 양도 여기서 같이 세팅
+			GetCharacterMovement()->MaxWalkSpeed = CharData->MoveSpeed;
+			
+			UE_LOG(LogTemp, Log, TEXT("Data Loaded! MaxHP: %f"), MaxHP);
 		}
 	
 	}
@@ -179,6 +224,20 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 		{
 			CurrentVel.Z = -100.0f;
 			GetCharacterMovement()->Velocity = CurrentVel;
+		}
+	}
+	
+	if (bIsBoosting)
+	{
+		// 1. 현재 속도 확인 (2D 평면 기준)
+		float CurrentSpeed = GetVelocity().Size2D();
+		
+		if (CurrentSpeed < 100.0f)
+		{
+			// 3. 입력이 아예 없거나 벽에 가로막힌 경우 대시 종료
+			StopBoost();
+			
+			// UE_LOG(LogTemp, Warning, TEXT("Dash Auto Stopped - Velocity too low"));
 		}
 	}
 	
@@ -333,15 +392,15 @@ void AExiaCharacterBase::StopJumpDash()
 
 void AExiaCharacterBase::StartBoost()
 {
-	// 이동 입력 가져오기
-	FVector InputDir = GetLastMovementInputVector();
+	if (bIsBoosting) return;
 	
 	// 아무 키도 눌리지 않았다면 부스트를 실행하지 않음.
+	FVector InputDir = GetLastMovementInputVector();
 	if (InputDir.IsNearlyZero()) return;
-	
 	bIsBoosting = true;
 	
 	bUseControllerRotationYaw = true;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
 	
 	FVector LaunchDir = GetLastMovementInputVector().GetSafeNormal();
 	GetCharacterMovement()->RotationRate = FRotator(0,0,0);
@@ -355,7 +414,7 @@ void AExiaCharacterBase::StartBoost()
 
 void AExiaCharacterBase::Boosting()
 {
-	if (bBlock || !bIsBoosting) return;
+	if (bIsBoosting || GetCharacterMovement()->IsFalling()) return;
 	
 	// [길게 누르기 대응] 누르고 있는 동안 매 프레임 실행
 	if (GetCharacterMovement()->IsFalling())
@@ -366,31 +425,33 @@ void AExiaCharacterBase::Boosting()
 	
 	// GN입자 실시간 소모
 	float DeltaTime = GetWorld()->GetDeltaSeconds();
-	ConsumeGNParticles(DeltaTime);
+	//ConsumeGNParticles(DeltaTime);
 }
 
 void AExiaCharacterBase::StopBoost()
 {
+	if (!bIsBoosting) return;
+	
 	bIsBoosting = false;
-
-	bUseControllerRotationYaw = false;
+	
 	//속도 원복
 	GetCharacterMovement()->RotationRate = FRotator(0,180.0f,0);
-	
+	GetCharacterMovement()->bOrientRotationToMovement = true; 
+
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 }
 
 void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
 {
 	//d 추후 데이터 테이블의 CurrentGNParticles의 값을 깍는 로직이 들어갈 자리
-	if (CurrentStat.MaxGNParticles <= 0) StopBoost();
+	//if (CurrentStat.MaxGNParticles <= 0) StopBoost();
 }
 
 void AExiaCharacterBase::Move(const FInputActionValue& Value)
 {
 	FVector2D MovementVector = Value.Get<FVector2D>();
 	
-	if (bBlock || bIsBraking) return;
+	if (bIsBraking) return;
 
 	// 디버그용
 	UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);

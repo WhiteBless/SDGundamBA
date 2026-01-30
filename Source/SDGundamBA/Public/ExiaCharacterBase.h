@@ -71,13 +71,21 @@ protected:
 	float JumpBoostForce = 110000.0f; // 상승 추력
 	
 public:
+	UFUNCTION(BlueprintCallable, Category = "Movement")
 	FORCEINLINE bool IsBoosting() const { return bIsBoosting; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	FORCEINLINE bool IsJumpBoosting() const { return bIsJumpBoosting; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	FORCEINLINE bool IsJumping() const { return bIsJumping; }
 	//상태 변수
 	
 	bool bIsJumping;
 	
 	// 점프 가능 여부 (착지 후 딜레이용)
 	bool bCanJump = true;
+	
 	
 protected:
 	bool bIsBoosting = false;
@@ -105,6 +113,7 @@ protected:
 	//부스트 관련 함수 정의
 	void StartBoost();	//누르기 시작
 	void Boosting();	// 누르는 도중
+	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void StopBoost();	// 떼는 그 시점
 	
 	//GN 입자(스테미나) 소모 로직 (추후 상세 구현 예정)
@@ -128,13 +137,38 @@ public:
 	bool bIsBraking;
 	
 protected:
+	// 데이터 테이블 에셋을 에디터에서 지정할 변수
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
+	UDataTable* CharacterDataTable;
+
+	// 데이터 테이블 행 이름
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
+	FName CharacterRowName;
+
+	// --- 실제 사용할 스탯 변수들 ---
+    
+	// 변하는 체력
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stat")
+	float CurrentHP;
+
+	// 최대 체력 (데이터 테이블에서 가져옴)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stat")
+	float MaxHP;
+	
+	// 피격 몽타주 변수 
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	UAnimMontage* HitMontage;
+	
+public:
+	virtual void ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName) override;
+	
+protected:
 	// 가드 상태 정의
 	UPROPERTY(BlueprintReadWrite, Category = "States")
 	bool bBlock;
 	
 	void BlockingStateStart();
 	void BlockingStateEnd();
-	
 	
 	// 비행 중 적용할 중력 값
 	UPROPERTY(EditAnywhere, Category = "Movement")
