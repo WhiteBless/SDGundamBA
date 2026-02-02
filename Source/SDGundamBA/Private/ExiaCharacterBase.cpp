@@ -2,13 +2,17 @@
 
 
 #include "ExiaCharacterBase.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "MotionWarpingComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
+#include "DrawDebugHelpers.h"
+#include "Components/BoxComponent.h"
 #include "Engine/DataTable.h"
+#include "SDGundamBA.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 // Sets default values
@@ -21,14 +25,104 @@ AExiaCharacterBase::AExiaCharacterBase()
 	SpringArmComp->TargetArmLength = 500.0f;
 	SpringArmComp->bUsePawnControlRotation = true;
 	
+	//무기 콜리전
+	WeaponCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("WeaponCollision"));
+	WeaponCollision->SetupAttachment(GetMesh(), FName("Forearm_WeaponSocket_R"));
+	WeaponCollision->SetCollisionProfileName(TEXT("GN_Sword"));
+	WeaponCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	
 	CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	CameraComp->SetupAttachment(SpringArmComp);
 	
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
-	JumpMaxHoldTime = 0.2f;
+	JumpMaxHoldTime = 0.15f;
+	
+	CurrentGNParticles = 200.0f;
 }
 
+void AExiaCharacterBase::OpenInputBuffer()
+{
+	bIsBufferWindowOpen = true;
+	bHasBufferedInput = false; // 창이 열릴 때 초기화
+}
+
+void AExiaCharacterBase::CloseInputBuffer()
+{
+	bIsBufferWindowOpen = false;
+}
+
+void AExiaCharacterBase::ExecuteAttack_Implementation()
+{
+    // 상태 체크 (최상단에 위치해야 합니다)
+    UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+    if (!AnimInstance) return;
+
+    // 이미 공격 중일 때의 처리 (선입력 로직)
+	if (AnimInstance->Montage_IsPlaying(AttackMontage))
+	{
+		// 콤보 입력 가능 구간(Window)이 열려있을 때만 다음 입력을 버퍼에 저장
+		if (bIsBufferWindowOpen) 
+		{
+			bHasBufferedInput = true;
+			UE_LOG(LogTemp, Warning, TEXT("Combo Buffered! Next Hit will trigger."));
+		}
+		return; // 현재 애니메이션이 나오고 있으므로 여기서 중단
+	}
+
+    // 타겟 탐색 (Sphere Trace)
+    FVector Start = GetActorLocation();
+    FVector End = Start + (GetActorForwardVector() * 2500.0f); 
+    float Radius = 300.0f; 
+    
+    FCollisionObjectQueryParams ObjectQueryParams;
+	ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::BossEnemy);
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this);
+
+    bool bHit = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity, ObjectQueryParams, FCollisionShape::MakeSphere(Radius), Params);
+
+    // 모션 워핑 설정
+    if (bHit && HitResult.GetActor())
+    {
+        SetWarpTarget(HitResult.GetActor());
+        
+        // 디버그 표시 (타겟 발견 시 빨간색)
+        DrawDebugSphere(GetWorld(), HitResult.GetActor()->GetActorLocation(), 30.0f, 12, FColor::Red, false, 2.0f);
+    }
+    else
+    {
+        SetWarpTarget(nullptr);
+    }
+
+    // 탐색 범위 디버그 표시 (초록색 캡슐)
+    FVector Center = Start + (GetActorForwardVector() * (500.0f * 0.5f));
+    DrawDebugCapsule(GetWorld(), Center, 250.0f, Radius, FQuat::Identity, FColor::Green, false, 1.0f);
+
+    // 4. 실제 공격 실행 (콤보 로직)
+	if (AttackMontage && ComboNames.IsValidIndex(AttackComboCount))
+	{
+		FName TargetSection = ComboNames[AttackComboCount];
+		PlayAnimMontage(AttackMontage, 1.0f, TargetSection);
+        
+		// 다음 타수로 증가 (배열 크기 안에서 순환)
+		AttackComboCount = (AttackComboCount + 1) % ComboNames.Num();
+        
+		bIsAttacking = true;
+		bHasBufferedInput = false; // 새로운 공격 시작 시 버퍼 초기화
+	}
+	
+	UAnimInstance* ExiaAnimInstance = GetMesh()->GetAnimInstance();
+	if (!AnimInstance) return;
+}
+
+void AExiaCharacterBase::ResettingComboAttack()
+{
+	AttackComboCount = 0; // 
+	bIsAttacking = false; // [cite: 16]
+}
 
 // Called when the game starts or when spawned
 void AExiaCharacterBase::BeginPlay()
@@ -36,8 +130,13 @@ void AExiaCharacterBase::BeginPlay()
 	Super::BeginPlay();
 	LoadCharacterData();
 	
-	GetCharacterMovement()->JumpZVelocity = 900.f;	// 최대 높이 제한
-	GetCharacterMovement()->GravityScale = 4.5f;	// 시작 시 중력 스케일 설정
+	//GetCharacterMovement()->JumpZVelocity = 900.f;	// 최대 높이 제한
+	//GetCharacterMovement()->GravityScale = 4.5f;	// 시작 시 중력 스케일 설정
+	
+	if (WeaponCollision)
+	{
+		WeaponCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnWeaponOverlap);
+	}
 	
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -55,11 +154,13 @@ void AExiaCharacterBase::BeginPlay()
 	}
 }
 
-void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName)
+void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation)
 {
-	IGundamCombatInterface::ApplyGundamDamage_Implementation(DamageAmount, Attacker, HitBoneName);
-
+	// IGundamCombatInterface::ApplyGundamDamage_Implementation(DamageAmount, Attacker, HitBoneName, HitLocation);
 	if (CurrentHP <= 0.0f) return;
+	
+	CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, CurrentStat.MaxHP);
+	UE_LOG(LogTemp, Warning, TEXT("Hit! HP Left: %f"), CurrentHP);
 	
 	if (CurrentHP <= 0.0f)
 	{
@@ -91,7 +192,7 @@ void AExiaCharacterBase::BlockingStateStart()
 {
 	if (bBlock)
 	{
-		GetCharacterMovement()->GravityScale = 20.5f;
+		GetCharacterMovement()->GravityScale = 5.5f;
 		GetCharacterMovement()->MaxWalkSpeed = 2.0f;
 	}
 }
@@ -100,7 +201,7 @@ void AExiaCharacterBase::BlockingStateEnd()
 {
 	if (!bBlock)
 	{
-		GetCharacterMovement()->GravityScale = 4.5f;
+		GetCharacterMovement()->GravityScale = DefaultGravityScale;
 		GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 	}
 }
@@ -117,14 +218,23 @@ void AExiaCharacterBase::LoadCharacterData()
 	{
 		static const FString ContextString(TEXT("Character Data Context"));
 		FGundamCharacterData* CharData = CharacterDataTable->FindRow<FGundamCharacterData>(CharacterRowName, ContextString);
-		// 3. 데이터를 찾았다면 변수에 할당
+		// 데이터를 찾았다면 변수에 할당
 		if (CharData)
 		{
+			CurrentStat = *CharData;
+			auto* Movement = GetCharacterMovement();
+			if (Movement)
+			{
+				Movement->MaxWalkSpeed = CurrentStat.MoveSpeed;
+				Movement->JumpZVelocity = CurrentStat.JumpZVelocity;
+				Movement->GravityScale = CurrentStat.DefaultGravityScale;
+			}
 			// 최대 체력을 데이터 테이블 값으로 설정
 			MaxHP = CharData->MaxHP;
-			CurrentStat = *CharData;
+			
 			// 게임 시작시 체력 회복
-			CurrentHP = MaxHP;
+			CurrentHP = CurrentStat.MaxHP;
+			CurrentGNParticles = CurrentStat.GNParticles;
 
 			// 이동 속도나 부스트 양도 여기서 같이 세팅
 			GetCharacterMovement()->MaxWalkSpeed = CharData->MoveSpeed;
@@ -142,7 +252,7 @@ void AExiaCharacterBase::StartFlying()
 	if (GetCharacterMovement())
 	{
 		// 비행 시작
-		GetCharacterMovement()->GravityScale = FlightGravityScale + 3.0f;
+		GetCharacterMovement()->GravityScale = FlightGravityScale;
 		
 		// 공중에서 즉시 멈칫하는 현상을 방지하기 위해 속도 제동 보정
 		//GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
@@ -171,6 +281,106 @@ void AExiaCharacterBase::ResetJumpLock()
 {
 	bCanJump = true;
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+void AExiaCharacterBase::UpdateBoostEnergy()
+{
+	// 0.1초당 소모량만큼 차감
+	float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.1f);
+	CurrentGNParticles -= ConsumeAmount;
+	
+	// 부스트 지속 시간 확인
+	float BoostTime = GetWorldTimerManager().GetTimerElapsed(BoostTimerHandle);
+	
+	// 현재 속도
+	float CurrentSpeed = GetVelocity().Size2D();
+	
+	// 부스트 중단 조건 체크
+	// 연료 소진 시 혹은 정지 시 부스트 종료
+	if (CurrentGNParticles <= 0)
+	{
+		StopBoost();
+		if (GEngine) GEngine->AddOnScreenDebugMessage(5, 2.0f, FColor::Red, TEXT("Boost OFF: No Fuel!"));
+		return;
+	}
+	
+	// 부스트 중단 조건2 멈췄을때
+	if(CurrentSpeed < 50.0f)
+	{
+		StopBoost();
+		if (GEngine) GEngine->AddOnScreenDebugMessage(6, 0.1f, FColor::Yellow, TEXT("Boost Warning: Speed Low"));
+	}
+	
+	// 디버그 로그
+	if (GEngine)
+	{
+		FString Msg = FString::Printf(TEXT("Using GN Particles: %.1f"), CurrentGNParticles);
+		// 부스트 중일 때는 '빨간색'으로 표시
+		GEngine->AddOnScreenDebugMessage(2, 0.1f, FColor::Red, Msg);
+	}
+}
+
+void AExiaCharacterBase::RecoverGNParticles()
+{
+	float RecoveryRate = CurrentStat.BoostConsumptionRate * 0.8f;
+	float RecoveryAmount = RecoveryRate * 0.1f;
+	
+	CurrentGNParticles += RecoveryAmount;
+	
+	// (디버그용)로그 출력
+	if (GEngine)
+	{
+		FString Msg = FString::Printf(TEXT("Recovering... %.1f / %.1f"), CurrentGNParticles, CurrentStat.GNParticles);
+		GEngine->AddOnScreenDebugMessage(3, 0.1f, FColor::Green, Msg);
+	}
+	
+	// 만약 GN입자가 최대치일때 예외적 처리
+	if (CurrentGNParticles >= CurrentStat.GNParticles)
+	{
+		CurrentGNParticles = CurrentStat.GNParticles;
+		GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+        
+		if (GEngine) GEngine->AddOnScreenDebugMessage(4, 2.0f, FColor::Cyan, TEXT("GN Particles Fully Charged!"));
+	}
+	
+}
+
+void AExiaCharacterBase::SetWeaponCollisionEnabled(bool bEnabled)
+{
+	if (WeaponCollision)
+	{
+		if (bEnabled)
+		{
+			WeaponCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			HitActors.Empty(); // 새로운 공격이니 목록 초기화
+		}
+		else
+		{
+			WeaponCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
+}
+
+void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
+										 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+										 bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (OtherActor == this || HitActors.Contains(OtherActor)) return;
+
+	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass()))
+	{
+		// [핵심] 칼날 박스 위치를 기본값으로 하되, 적 콜리전과 가장 가까운 접점을 찾습니다.
+		FVector HitPoint = WeaponCollision->GetComponentLocation();
+		if (OtherComp)
+		{
+			OtherComp->GetClosestPointOnCollision(WeaponCollision->GetComponentLocation(), HitPoint);
+		}
+
+		// 수정한 인터페이스 호출 (HitPoint를 마지막 인자로 전달)
+		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, 10.0f, this, FName("Body"), HitPoint);
+        
+		HitActors.Add(OtherActor);
+	}
 }
 
 void AExiaCharacterBase::EnableMovementCustom()
@@ -227,19 +437,20 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 		}
 	}
 	
-	if (bIsBoosting)
-	{
-		// 1. 현재 속도 확인 (2D 평면 기준)
-		float CurrentSpeed = GetVelocity().Size2D();
-		
-		if (CurrentSpeed < 100.0f)
-		{
-			// 3. 입력이 아예 없거나 벽에 가로막힌 경우 대시 종료
-			StopBoost();
-			
-			// UE_LOG(LogTemp, Warning, TEXT("Dash Auto Stopped - Velocity too low"));
-		}
-	}
+	// 연료 기능 구현하면서 중간 조건이 같이 추가되었으며 더이상 Tick에서 처리 하지 않음.
+	// if (bIsBoosting)
+	// {
+	// 	// 1. 현재 속도 확인 (2D 평면 기준)
+	// 	float CurrentSpeed = GetVelocity().Size2D();
+	// 	
+	// 	if (CurrentSpeed < 100.0f)
+	// 	{
+	// 		// 3. 입력이 아예 없거나 벽에 가로막힌 경우 대시 종료
+	// 		StopBoost();
+	// 		
+	// 		// UE_LOG(LogTemp, Warning, TEXT("Dash Auto Stopped - Velocity too low"));
+	// 	}
+	// }
 	
 	if (GetCharacterMovement()->IsFalling() && bIsBoosting)
 	{
@@ -328,7 +539,7 @@ void AExiaCharacterBase::JumpBoosting()
 		float DeltaTime = GetWorld()->GetDeltaSeconds();
 		ConsumeGNParticles(DeltaTime); 
 		
-		GetCharacterMovement()->MaxAcceleration = 5000.0f;
+		GetCharacterMovement()->MaxAcceleration = 6000.0f;
 	}
 }
 
@@ -355,7 +566,7 @@ void AExiaCharacterBase::Jump()
 	{
 
 		FVector JumpDir = GetLastMovementInputVector();
-		float JumpUpForce = 800.f;
+		float JumpUpForce = 1200.f;
 		float JumpForwardForce = 400.f;
 		
 		FVector LaunchVel = (JumpDir * JumpForwardForce) + FVector(0,0, JumpUpForce);
@@ -374,8 +585,7 @@ void AExiaCharacterBase::StartJumpDash()
 	{
 		bIsJumpBoosting = true;
 		
-		GetCharacterMovement()->GravityScale = 0.00001f;
-		GetCharacterMovement()->AirControl = 0.8f;
+		GetCharacterMovement()->GravityScale = 1.0f;
 		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
 		
 	}
@@ -386,8 +596,7 @@ void AExiaCharacterBase::StopJumpDash()
 	bIsJumpBoosting = false;
 	bIsJumping = false;
 	
-	GetCharacterMovement()->GravityScale = 2.0f;
-	GetCharacterMovement()->AirControl = 0.05f;
+	GetCharacterMovement()->GravityScale = DefaultGravityScale;
 }
 
 void AExiaCharacterBase::StartBoost()
@@ -397,7 +606,15 @@ void AExiaCharacterBase::StartBoost()
 	// 아무 키도 눌리지 않았다면 부스트를 실행하지 않음.
 	FVector InputDir = GetLastMovementInputVector();
 	if (InputDir.IsNearlyZero()) return;
+	
+	// 회복 타이머가 돌고 있었다면 중지시킨다. ( 동시 실행 방지 )
+	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+	
+	// 부스팅 상태 전환
 	bIsBoosting = true;
+	
+	// 소모 타이머 시작 0.1초마다 UpdateBoostEnegy 함수를 반복 실행
+	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
 	
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
@@ -405,6 +622,8 @@ void AExiaCharacterBase::StartBoost()
 	FVector LaunchDir = GetLastMovementInputVector().GetSafeNormal();
 	GetCharacterMovement()->RotationRate = FRotator(0,0,0);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
+	
+
 	// [짧게 누르기 대응] 즉각적인 반응 필요
 	if (GetCharacterMovement()->IsFalling())
 	{
@@ -425,7 +644,8 @@ void AExiaCharacterBase::Boosting()
 	
 	// GN입자 실시간 소모
 	float DeltaTime = GetWorld()->GetDeltaSeconds();
-	//ConsumeGNParticles(DeltaTime);
+	
+	ConsumeGNParticles(DeltaTime);
 }
 
 void AExiaCharacterBase::StopBoost()
@@ -433,12 +653,20 @@ void AExiaCharacterBase::StopBoost()
 	if (!bIsBoosting) return;
 	
 	bIsBoosting = false;
+		
+	// 소모 타이머 중지
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
 	
 	//속도 원복
+	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->RotationRate = FRotator(0,180.0f,0);
 	GetCharacterMovement()->bOrientRotationToMovement = true; 
-
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+
+	if (CurrentGNParticles < CurrentStat.GNParticles)
+	{
+		GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
+	}
 }
 
 void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
@@ -454,7 +682,7 @@ void AExiaCharacterBase::Move(const FInputActionValue& Value)
 	if (bIsBraking) return;
 
 	// 디버그용
-	UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
+	//UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
 	
 	if (Controller != nullptr)
 	{
@@ -484,6 +712,38 @@ void AExiaCharacterBase::Look(const FInputActionValue& Value)
 		AddControllerYawInput(LookAxisVector.X);
 		//마우스 상하 움직임
 		AddControllerPitchInput(LookAxisVector.Y);
+	}
+}
+
+void AExiaCharacterBase::SetWarpTarget(AActor* TargetActor)
+{
+	if (MotionWarpingComp && TargetActor)
+	{
+		FVector MyLocation = GetActorLocation();
+		FVector TargetLocation = TargetActor->GetActorLocation();
+
+		// 적을 바라보는 정확한 회전값 계산
+		// 내 위치에서 적의 위치를 바라보는 각도를 구합니다.
+		FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(MyLocation, TargetLocation);
+		LookAtRot.Pitch = 0.0f; // 캐릭터가 위아래로 기울지 않게 고정
+		LookAtRot.Roll = 0.0f;
+
+		// 적의 몸 속으로 파고들지 않게 적 위치에서 내 쪽으로 살짝 오프셋(간격) 주기
+		// 적과 나 사이의 방향 벡터를 구해서 약 60~80cm 정도 앞에서 멈추게 합니다.
+		FVector Direction = (MyLocation - TargetLocation).GetSafeNormal();
+		FVector WarpLocation = TargetLocation + (Direction * 80.0f); 
+
+		// 워핑 타겟 업데이트
+		MotionWarpingComp->AddOrUpdateWarpTargetFromLocationAndRotation(
+			FName("AttackTarget"),
+			WarpLocation,
+			LookAtRot
+		);
+	}
+	else if (MotionWarpingComp) // 타겟이 없으면?
+	{
+		// 워핑 타겟을 지워버립니다 (그냥 제자리 공격)
+		MotionWarpingComp->RemoveWarpTarget(FName("AttackTarget"));
 	}
 }
 

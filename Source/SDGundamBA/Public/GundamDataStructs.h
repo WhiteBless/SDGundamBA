@@ -25,10 +25,9 @@ public:
 	
 	//부스터 정의
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
-	float MaxGNParticles; //부스터 총량
+	float GNParticles; //부스터 총량
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
-	float BoostConsumptionReate;
+
 	
 	//스페셜 스킬 정의
 	//트랜잠 활성 / 비활성 상태 정의
@@ -39,10 +38,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Special")
 	float TransAmDuration;
 	
+	//이동 관련 상세 스텟
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Movement")
+	float JumpZVelocity;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Movement")
+	float DefaultGravityScale = 1.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
+	float BoostSpeedMultiplier;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
+	float BoostConsumptionRate;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
+	float FlightGravityScale = 0.5f;
+	
 	//생성자  -- 기본 값을 정의 --
 	FGundamCharacterData()
-		: MaxHP(2000.f), MoveSpeed(700.f), MaxGNParticles(100.f)
-		, BoostConsumptionReate(20.f), bHasTransAm(false), TransAmDuration(15.f)
+		: MaxHP(2000.f), MoveSpeed(700.f), GNParticles(200.f), JumpZVelocity(900.f), BoostSpeedMultiplier(2.0f)
+		, BoostConsumptionRate(20.f), bHasTransAm(false), TransAmDuration(15.f)
 	{}
 };
 class SDGUNDAMBA_API GundamDataStructs

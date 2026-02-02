@@ -5,6 +5,7 @@
 #include "GundamDataStructs.h" // 구조체 포함
 #include "InputActionValue.h"
 #include "ExiaAnimInstance.h"
+#include "MotionWarpingComponent.h"
 #include "ExiaCharacterBase.generated.h"
 
 UENUM(Blueprintable)
@@ -18,14 +19,56 @@ UCLASS()
 class SDGUNDAMBA_API AExiaCharacterBase : public ACharacter, public IGundamCombatInterface, public IGundamStateInterface
 {
 	GENERATED_BODY()
+	
+protected:
+	// 콤보 섹션 이름 배열 (블루프린트의 ComboNames 대응) 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	TArray<FName> ComboNames;
+
+	// 현재 콤보 카운트 (블루프린트의 AttackComboCount 대응) [cite: 5]
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	int32 AttackComboCount = 0;
+
+	// 공격 중 여부 (블루프린트의 Attacking 대응) [cite: 15]
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	bool bIsAttacking = false;
+
+	// 공격 몽타주 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	class UAnimMontage* AttackMontage;
+
+public:
+	// 블루프린트에서 호출할 공격 실행 함수
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	//void ExecuteAttack();
+	virtual void ExecuteAttack_Implementation() override;
+
+	// 콤보 리셋 함수 (블루프린트의 ResettingComboAttack 대응)
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	void ResettingComboAttack();
+	
+protected:
+	bool bHasBufferedInput;
+	bool bIsBufferWindowOpen;
 
 public:
 	// Sets default values for this character's properties
 	AExiaCharacterBase();
 
+	void OpenInputBuffer();
+	void CloseInputBuffer();
+	
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	
+	// 무기 판정용 박스 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	class UBoxComponent* WeaponCollision;
+	
+	// 히트된 적들을 기억하는 배열 (중복 타격 방지용)
+	UPROPERTY()
+	TArray<AActor*> HitActors;
 	
 	// 컴포넌트 부착
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
@@ -34,7 +77,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class UCameraComponent* CameraComp;
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement")
+	// 모션 와핑
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Warping")
 	class UMotionWarpingComponent* MotionWarpingComp;
 	
 	// 데이터 관련
@@ -68,8 +112,17 @@ protected:
 	float VerticalBoostForce = 500.0f; // 점프 파워
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat")
-	float JumpBoostForce = 110000.0f; // 상승 추력
+	float JumpBoostForce = 200000.0f; // 상승 추력
 	
+	//GN입자
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stat")
+	float CurrentGNParticles;
+	
+	FTimerHandle BoostTimerHandle;
+	void UpdateBoostEnergy(); // 연료 차감 전용 함수
+
+	FTimerHandle RecoveryTimerHandle;
+	void RecoverGNParticles(); // 연료 회복 전용 함수
 public:
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	FORCEINLINE bool IsBoosting() const { return bIsBoosting; }
@@ -80,12 +133,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	FORCEINLINE bool IsJumping() const { return bIsJumping; }
 	//상태 변수
-	
 	bool bIsJumping;
 	
 	// 점프 가능 여부 (착지 후 딜레이용)
 	bool bCanJump = true;
 	
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetWeaponCollisionEnabled(bool bEnabled);
+	
+	UFUNCTION()
+	void OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
+						 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+						 bool bFromSweep, const FHitResult& SweepResult);
 	
 protected:
 	bool bIsBoosting = false;
@@ -129,7 +188,11 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Movement")
 	float RightVelocity;
 	
+	
 public:
+	//타겟 지정 함수 락온등에서 이용 예정
+	void SetWarpTarget(AActor* TargetActor);
+	
 	// 제동 관련 선언
 	void StartBraking();
 	void StopBraking();
@@ -160,7 +223,7 @@ protected:
 	UAnimMontage* HitMontage;
 	
 public:
-	virtual void ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName) override;
+	virtual void ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation) override;
 	
 protected:
 	// 가드 상태 정의

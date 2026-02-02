@@ -16,9 +16,10 @@ class IGundamCombatInterface
 	GENERATED_BODY()
 	
 public:
+	// ApplyGundamDamage 함수에 FVector HitLocation 파라미터를 추가합니다.
 	//데미지 전달 (맞은 부위 뼈 이름 포함)
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Gundam | Combat")
-	void ApplyGundamDamage(float DamageAmount, AActor* Attacker, FName HitBoneName);
+	void ApplyGundamDamage(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation);
 	
 	//공격 실행 명령
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Gundam | Combat")
