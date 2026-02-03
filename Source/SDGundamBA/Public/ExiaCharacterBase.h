@@ -32,20 +32,41 @@ protected:
 	// 공격 중 여부 (블루프린트의 Attacking 대응) [cite: 15]
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
 	bool bIsAttacking = false;
-
+	
+	
 	// 공격 몽타주 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
 	class UAnimMontage* AttackMontage;
+	
+	// 공격력
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+	float AttackPower = 100.0f;
+
+	// 방어력
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+	float DefensePower = 10.0f;
+
+	// 가드 데미지 감소율
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+	float GuardDamageReduction = 0.5f;
 
 public:
 	// 블루프린트에서 호출할 공격 실행 함수
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
-	//void ExecuteAttack();
-	virtual void ExecuteAttack_Implementation() override;
+	virtual void ExecuteAttack_Implementation() override; //void ExecuteAttack();
+	
+	
 
 	// 콤보 리셋 함수 (블루프린트의 ResettingComboAttack 대응)
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
 	void ResettingComboAttack();
+	
+	// 데미지 처리
+	virtual void ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation) override;
+	
+	//TODO AI캐릭터 행동트리
+	UPROPERTY(EditAnywhere, Category = "AI")
+	class UBehaviorTree* AIBehaviorTree;
 	
 protected:
 	bool bHasBufferedInput;
@@ -58,7 +79,64 @@ public:
 	void OpenInputBuffer();
 	void CloseInputBuffer();
 	
+	// 가드 이펙트용 스태틱 메쉬 (GN 필드)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UStaticMeshComponent* GuardShieldMesh;
+
+	// 가드 쿨타임 (가드를 풀고 나서 다시 올리기까지 걸리는 시간)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	float GuardCooldownTime = 0.5f;
+
+	// 현재 가드 가능 여부 (쿨타임 체크용)
+	bool bCanGuard = true;
+
+	// 쿨타임 타이머 핸들
+	FTimerHandle GuardCooldownTimer;
+
+	// 쿨타임 종료 후 실행될 함수
+	void ResetGuardCooldown();
+	
+	// AI와 플레이어 공용 가드 함수
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	void StartGuard();
+
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	void StopGuard();
+	
+	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	
 protected:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float MaxGuardHP = 100.0f;
+
+	// 현재 가드 내구도
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float CurrentGuardHP;
+
+	// 가드 회복 속도 (초당 회복량)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float GuardRecoveryRate = 4.0f;
+
+	// 가드 브레이크 시 경직 시간
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float StunDuration = 2.0f;
+	
+	// 현재 경직(가드 브레이크) 상태인가?
+	bool bIsStunned = false;
+	
+	// 가드 브레이크 모션 (비틀거리는 모션)
+	UPROPERTY(EditAnywhere, Category = "Animation | Combat")
+	UAnimMontage* GuardBreakMontage;
+	
+	// 가드 브레이크 발생 처리
+	void OnGuardBreak();
+
+	// 경직 회복 처리
+	void RecoverFromStun();
+
+	// 가드 게이지 회복 타이머용
+	void RegenerateGuardHP(float DeltaTime);
+	
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	
@@ -71,38 +149,38 @@ protected:
 	TArray<AActor*> HitActors;
 	
 	// 컴포넌트 부착
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	class USpringArmComponent* SpringArmComp;
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	class UCameraComponent* CameraComp;
+	// UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	// class USpringArmComponent* SpringArmComp;
+	//
+	// UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	// class UCameraComponent* CameraComp;
 	
 	// 모션 와핑
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Warping")
 	class UMotionWarpingComponent* MotionWarpingComp;
 	
 	// 데이터 관련
-	UPROPERTY(VisibleDefaultsOnly, Category = "Data")
+	UPROPERTY(EditDefaultsOnly, Category = "Data")
 	class UDataTable* StatDataTable;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stat")
 	FGundamCharacterData CurrentStat;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputMappingContext* DefaultMappingContext;
+	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	// class UInputMappingContext* DefaultMappingContext;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* MoveAction;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* LookAction;
-	
-	//부스트 입력 액션
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* BoostAction;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* JumpAction;
+	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	// class UInputAction* MoveAction;
+	//
+	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	// class UInputAction* LookAction;
+	//
+	// //부스트 입력 액션
+	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	// class UInputAction* BoostAction;
+	//
+	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	// class UInputAction* JumpAction;
 	
 	//부스트 설정 수치
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat")
@@ -147,6 +225,14 @@ public:
 						 bool bFromSweep, const FHitResult& SweepResult);
 	
 protected:
+	// 가드 몽타주 (여기에 '가드 루프'와 '가드 브레이크'가 같이 들어있는 몽타주를 넣으세요)
+	UPROPERTY(EditAnywhere, Category = "Animation | Combat")
+	UAnimMontage* GuardMontage;
+
+	// 가드 루프 섹션 이름 (예: "GuardLoop")
+	UPROPERTY(EditAnywhere, Category = "Animation | Combat")
+	FName GuardLoopSectionName = FName("GuardLoop");
+	
 	bool bIsBoosting = false;
 	bool bIsJumpBoosting = false;
 	
@@ -165,6 +251,10 @@ protected:
 	void JumpBoosting();  // Triggered (상승 유지)
 	void StopJumpBoost();  // Completed
 	
+	// 비행모드 상태
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Movement")
+	bool bIsFlying = false;
+	
 	void Jump();
 	void StartJumpDash();
 	void StopJumpDash();
@@ -178,8 +268,8 @@ protected:
 	//GN 입자(스테미나) 소모 로직 (추후 상세 구현 예정)
 	void ConsumeGNParticles(float DeltaTime);
 	
-	void Move(const FInputActionValue& Value);
-	void Look(const FInputActionValue& Value);
+	// void Move(const FInputActionValue& Value);
+	// void Look(const FInputActionValue& Value);
 	
 	// --- 애니메이션 연동 변수 ---
 	UPROPERTY(BlueprintReadOnly, Category = "Movement")
@@ -200,10 +290,6 @@ public:
 	bool bIsBraking;
 	
 protected:
-	// 데이터 테이블 에셋을 에디터에서 지정할 변수
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
-	UDataTable* CharacterDataTable;
-
 	// 데이터 테이블 행 이름
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
 	FName CharacterRowName;
@@ -221,10 +307,7 @@ protected:
 	// 피격 몽타주 변수 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	UAnimMontage* HitMontage;
-	
-public:
-	virtual void ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation) override;
-	
+
 protected:
 	// 가드 상태 정의
 	UPROPERTY(BlueprintReadWrite, Category = "States")
@@ -235,7 +318,7 @@ protected:
 	
 	// 비행 중 적용할 중력 값
 	UPROPERTY(EditAnywhere, Category = "Movement")
-	float FlightGravityScale = 0.4f;
+	float FlightGravityScale = 1.0f;
 	
 	//기본 중력 값 정의
 	float DefaultGravityScale = 2.5f;
@@ -264,7 +347,7 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	// Called to bind functionality to input
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	//virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "State")
 	EGundamCombatState CombatState = EGundamCombatState::Exploring;

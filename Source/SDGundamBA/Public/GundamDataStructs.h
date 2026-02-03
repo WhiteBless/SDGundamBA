@@ -27,7 +27,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
 	float GNParticles; //부스터 총량
 	
+// 기본 공격력
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+    float AttackPower;
 
+    // 기본 방어력 (데미지 차감 수치)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+    float DefensePower = 10.0f;
+
+    // 가드 시 데미지 감소율 (0.0 ~ 1.0) 
+    // 예: 0.3이면 30%만 받고 70%는 막음. 0.0이면 완전 방어.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
+    float GuardDamageReduction;
 	
 	//스페셜 스킬 정의
 	//트랜잠 활성 / 비활성 상태 정의
@@ -43,7 +54,7 @@ public:
 	float JumpZVelocity;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Movement")
-	float DefaultGravityScale = 1.0f;
+	float DefaultGravityScale;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
 	float BoostSpeedMultiplier;
@@ -56,8 +67,9 @@ public:
 	
 	//생성자  -- 기본 값을 정의 --
 	FGundamCharacterData()
-		: MaxHP(2000.f), MoveSpeed(700.f), GNParticles(200.f), JumpZVelocity(900.f), BoostSpeedMultiplier(2.0f)
-		, BoostConsumptionRate(20.f), bHasTransAm(false), TransAmDuration(15.f)
+		: MaxHP(2000.f), MoveSpeed(700.f), GNParticles(300.f), JumpZVelocity(900.f), BoostSpeedMultiplier(2.5f)
+		, BoostConsumptionRate(20.f), bHasTransAm(false), TransAmDuration(15.f), DefaultGravityScale(4.5)
+		, AttackPower(10), DefensePower(2.2), GuardDamageReduction(0.5)
 	{}
 };
 class SDGUNDAMBA_API GundamDataStructs

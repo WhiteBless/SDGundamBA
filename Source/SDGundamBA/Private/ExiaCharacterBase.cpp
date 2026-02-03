@@ -1,13 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
+
+// #include "GameFramework/SpringArmComponent.h"
+// #include "Camera/CameraComponent.h"
+// #include "EnhancedInputComponent.h"
+// #include "EnhancedInputSubsystems.h"
+
 #include "ExiaCharacterBase.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "GameFramework/SpringArmComponent.h"
-#include "Camera/CameraComponent.h"
 #include "MotionWarpingComponent.h"
-#include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "DrawDebugHelpers.h"
 #include "Components/BoxComponent.h"
@@ -18,12 +20,15 @@
 // Sets default values
 AExiaCharacterBase::AExiaCharacterBase()
 {
+	bCanGuard = true;
+	GuardCooldownTime = 2.0f;
+	
 	PrimaryActorTick.bCanEverTick = true;
 	
-	SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
-	SpringArmComp->SetupAttachment(RootComponent);
-	SpringArmComp->TargetArmLength = 500.0f;
-	SpringArmComp->bUsePawnControlRotation = true;
+	// SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+	// SpringArmComp->SetupAttachment(RootComponent);
+	// SpringArmComp->TargetArmLength = 500.0f;
+	// SpringArmComp->bUsePawnControlRotation = true;
 	
 	//무기 콜리전
 	WeaponCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("WeaponCollision"));
@@ -31,14 +36,50 @@ AExiaCharacterBase::AExiaCharacterBase()
 	WeaponCollision->SetCollisionProfileName(TEXT("GN_Sword"));
 	WeaponCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	
-	CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
-	CameraComp->SetupAttachment(SpringArmComp);
+	// CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+	// CameraComp->SetupAttachment(SpringArmComp);
 	
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
-	JumpMaxHoldTime = 0.15f;
+	GuardShieldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GuardShieldMesh"));
+	GuardShieldMesh->SetupAttachment(GetMesh()); // 캐릭터 메쉬에 부착 (소켓 연결 추천)
+	GuardShieldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 충돌은 없게 (판정은 bBlock변수로 하니까)
+	GuardShieldMesh->SetHiddenInGame(true); // 게임 시작 시에는 숨김
+	
+	JumpMaxHoldTime = 0.0f;
 	
 	CurrentGNParticles = 200.0f;
+	
+	GetCharacterMovement()->JumpZVelocity = 900.f;
+}
+
+void AExiaCharacterBase::BeginPlay()
+{
+	Super::BeginPlay();
+	LoadCharacterData();
+	
+	//TODO 시작 시 가드 체력
+	CurrentGuardHP = MaxGuardHP; 
+	
+	if (WeaponCollision)
+	{
+		WeaponCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnWeaponOverlap);
+	}
+
+	// if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	// {
+	// 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+	// 	{
+	// 		if (DefaultMappingContext)
+	// 		{
+	// 			Subsystem->AddMappingContext(DefaultMappingContext, 0);
+	// 		}
+	// 		else
+	// 		{
+	// 			UE_LOG(LogTemp, Error, TEXT("DefaultMappingContext가 할당되지 않았습니다!"));
+	// 		}
+	// 	}
+	// }
 }
 
 void AExiaCharacterBase::OpenInputBuffer()
@@ -52,24 +93,111 @@ void AExiaCharacterBase::CloseInputBuffer()
 	bIsBufferWindowOpen = false;
 }
 
+void AExiaCharacterBase::ResetGuardCooldown()
+{
+	bCanGuard = true;
+	GetWorld()->GetTimerManager().ClearTimer(GuardCooldownTimer);
+	UE_LOG(LogTemp, Warning, TEXT("Guard Ready! (Cooldown Finished)"));
+}
+
+void AExiaCharacterBase::StartGuard()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (!AnimInstance) return;
+	
+	if (AnimInstance->Montage_IsPlaying(AttackMontage))
+	{
+		return; 
+	}
+	
+	if (bIsAttacking && !AnimInstance->Montage_IsPlaying(AttackMontage))
+	{
+		bIsAttacking = false;
+		UE_LOG(LogTemp, Warning, TEXT("Fixed Stuck State: bIsAttacking Forced to False inside Guard"));
+	}
+	
+	if (bIsStunned || bIsAttacking || !bCanGuard || GetCharacterMovement()->IsFalling() || bBlock) return;
+	
+	bBlock = true;
+
+	if (GuardMontage)
+	{
+		// 몽타주 재생
+		PlayAnimMontage(GuardMontage, 1.0f, GuardLoopSectionName);
+	}
+	
+	// 이펙트(GN 필드) 보이게 설정 (Hidden = false)
+	if (GuardShieldMesh)
+	{
+		GuardShieldMesh->SetHiddenInGame(false);
+	}
+
+	// 이동 속도 감소 (방어 자세니 느리게)
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.85f;
+
+	UE_LOG(LogTemp, Log, TEXT("Guard UP! Effect On."));
+}
+
+void AExiaCharacterBase::StopGuard()
+{
+	// 이미 가드가 풀려있다면 패스
+	if (!bBlock) return;
+
+	// 가드 상태 해제
+	bBlock = false;
+	
+	if (GuardMontage)
+	{
+		// 현재 재생 중인 몽타주가 내 가드 몽타주라면 멈춤
+		if (GetMesh()->GetAnimInstance()->Montage_IsPlaying(GuardMontage))
+		{
+			StopAnimMontage(GuardMontage);
+		}
+	}
+	
+	// 이펙트 숨기기 (Hidden = true)
+	if (GuardShieldMesh)
+	{
+		GuardShieldMesh->SetHiddenInGame(true);
+	}
+
+	// 이동 속도 복구
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+
+	// 쿨타임 적용 (가드 연타 방지)
+	bCanGuard = false;
+	GetWorld()->GetTimerManager().ClearTimer(GuardCooldownTimer);
+	GetWorld()->GetTimerManager().SetTimer(GuardCooldownTimer, this, &AExiaCharacterBase::ResetGuardCooldown, GuardCooldownTime, false);
+
+	UE_LOG(LogTemp, Warning, TEXT("Guard Cooldown Started (%f sec)"), GuardCooldownTime);
+}
+
 void AExiaCharacterBase::ExecuteAttack_Implementation()
 {
-    // 상태 체크 (최상단에 위치해야 합니다)
+    // 상태 체크
     UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-    if (!AnimInstance) return;
+	if (!AnimInstance) return;
+	if (bIsStunned) return;
+
+	if (bBlock)
+	{
+		StopGuard();
+	}
 
     // 이미 공격 중일 때의 처리 (선입력 로직)
 	if (AnimInstance->Montage_IsPlaying(AttackMontage))
 	{
-		// 콤보 입력 가능 구간(Window)이 열려있을 때만 다음 입력을 버퍼에 저장
 		if (bIsBufferWindowOpen) 
 		{
 			bHasBufferedInput = true;
 			UE_LOG(LogTemp, Warning, TEXT("Combo Buffered! Next Hit will trigger."));
 		}
-		return; // 현재 애니메이션이 나오고 있으므로 여기서 중단
+		return; 
 	}
 
+	bIsAttacking = true; 
+	bHasBufferedInput = false;
+	
     // 타겟 탐색 (Sphere Trace)
     FVector Start = GetActorLocation();
     FVector End = Start + (GetActorForwardVector() * 2500.0f); 
@@ -105,17 +233,29 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
 	if (AttackMontage && ComboNames.IsValidIndex(AttackComboCount))
 	{
 		FName TargetSection = ComboNames[AttackComboCount];
-		PlayAnimMontage(AttackMontage, 1.0f, TargetSection);
         
-		// 다음 타수로 증가 (배열 크기 안에서 순환)
+		// 몽타주 재생
+		AnimInstance->Montage_Play(AttackMontage, 1.0f);
+		AnimInstance->Montage_JumpToSection(TargetSection, AttackMontage);
+
+		// 애니메이션이 끝나면 OnAttackMontageEnded 함수가 실행되도록 연결
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AExiaCharacterBase::OnAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
+        
+		// 콤보 카운트 증가
 		AttackComboCount = (AttackComboCount + 1) % ComboNames.Num();
-        
-		bIsAttacking = true;
-		bHasBufferedInput = false; // 새로운 공격 시작 시 버퍼 초기화
 	}
 	
 	UAnimInstance* ExiaAnimInstance = GetMesh()->GetAnimInstance();
 	if (!AnimInstance) return;
+}
+
+void AExiaCharacterBase::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// 공격 몽타주가 끝났으니 공격 상태 해제
+	bIsAttacking = false;
+	UE_LOG(LogTemp, Warning, TEXT("Attack Ended. bIsAttacking = false"));
 }
 
 void AExiaCharacterBase::ResettingComboAttack()
@@ -124,34 +264,56 @@ void AExiaCharacterBase::ResettingComboAttack()
 	bIsAttacking = false; // [cite: 16]
 }
 
-// Called when the game starts or when spawned
-void AExiaCharacterBase::BeginPlay()
+void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
+										 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+										 bool bFromSweep, const FHitResult& SweepResult)
 {
-	Super::BeginPlay();
-	LoadCharacterData();
-	
-	//GetCharacterMovement()->JumpZVelocity = 900.f;	// 최대 높이 제한
-	//GetCharacterMovement()->GravityScale = 4.5f;	// 시작 시 중력 스케일 설정
-	
-	if (WeaponCollision)
+	if (OtherActor == this || HitActors.Contains(OtherActor)) return;
+
+	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass()))
 	{
-		WeaponCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnWeaponOverlap);
-	}
-	
-	if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+		// [핵심] 칼날 박스 위치를 기본값으로 하되, 적 콜리전과 가장 가까운 접점을 찾습니다.
+		FVector HitPoint = WeaponCollision->GetComponentLocation();
+		if (OtherComp)
 		{
-			if (DefaultMappingContext)
-			{
-				Subsystem->AddMappingContext(DefaultMappingContext, 0);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("DefaultMappingContext가 할당되지 않았습니다!"));
-			}
+			OtherComp->GetClosestPointOnCollision(WeaponCollision->GetComponentLocation(), HitPoint);
 		}
+
+		// 수정한 인터페이스 호출 (HitPoint를 마지막 인자로 전달)
+		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, 10.0f, this, FName("Body"), HitPoint);
+        
+		HitActors.Add(OtherActor);
 	}
+}
+
+void AExiaCharacterBase::OnGuardBreak()
+{
+	StopGuard();
+	bIsStunned = true;
+	
+	if (GuardBreakMontage)
+	{
+		PlayAnimMontage(GuardBreakMontage);
+	}
+	
+	UE_LOG(LogTemp, Error, TEXT("!!! GUARD BREAK !!! Stunned for %f seconds"), StunDuration);
+
+	// 일정 시간 뒤 경직 해제 타이머 설정
+	FTimerHandle StunTimerHandle;
+	GetWorld()->GetTimerManager().SetTimer(StunTimerHandle, this, &AExiaCharacterBase::RecoverFromStun, StunDuration, false);
+}
+
+void AExiaCharacterBase::RecoverFromStun()
+{
+	bIsStunned = false;
+	
+	CurrentGuardHP = MaxGuardHP * 0.3f;
+	
+	UE_LOG(LogTemp, Log, TEXT("Recovered from Stun."));
+}
+
+void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
+{
 }
 
 void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation)
@@ -159,12 +321,60 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	// IGundamCombatInterface::ApplyGundamDamage_Implementation(DamageAmount, Attacker, HitBoneName, HitLocation);
 	if (CurrentHP <= 0.0f) return;
 	
-	CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, CurrentStat.MaxHP);
-	UE_LOG(LogTemp, Warning, TEXT("Hit! HP Left: %f"), CurrentHP);
+	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);;
+		
+	
+	// 경직(Stun) 상태라면 무조건 데미지 100% (가드 불가)
+	if (bIsStunned)
+	{
+		CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, MaxHP);
+		// 필요하다면 여기서도 피격 모션 재생
+		if (HitMontage) PlayAnimMontage(HitMontage);
+		return;
+	}
+	
+	if (bBlock)
+	{
+		// 가드 게이지 차감
+		CurrentGuardHP -= DamageAmount;
+        
+		UE_LOG(LogTemp, Warning, TEXT("Blocked! Guard HP: %f / %f"), CurrentGuardHP, MaxGuardHP);
+
+		// 가드 브레이크 체크
+		if (CurrentGuardHP <= 0.0f)
+		{
+			CurrentGuardHP = 0.0f;
+			OnGuardBreak();
+		}
+		else
+		{
+			// 가드는 성공했지만 이펙트 등 출력
+			// (이미 구현하신 가드 이펙트가 나올 것임)
+		}
+	}
+	else // 가드 아님 -> 본체 데미지
+	{
+		float FinalDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);
+        
+		// 체력 차감
+		CurrentHP = FMath::Clamp(CurrentHP - FinalDamage, 0.0f, MaxHP);
+        
+		UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f, CurrentHP: %f"), FinalDamage, CurrentHP);
+
+		// 피격 모션 재생
+		if (HitMontage) PlayAnimMontage(HitMontage);
+	}
+	
+	CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
+    
+	// 로그 확인
+	UE_LOG(LogTemp, Warning, TEXT("%s took %f Damage. Current HP: %f"), *GetName(), ActualDamage, CurrentHP);
 	
 	if (CurrentHP <= 0.0f)
 	{
 		//TODO 사망판정 로직 작성 예정
+		// OnDeath(); // 사망 모션 재생 함수 호출 등
+		UE_LOG(LogTemp, Error, TEXT("%s Destroyed!"), *GetName());
 	}
 	
 	if (HitMontage && Attacker)
@@ -192,8 +402,8 @@ void AExiaCharacterBase::BlockingStateStart()
 {
 	if (bBlock)
 	{
-		GetCharacterMovement()->GravityScale = 5.5f;
-		GetCharacterMovement()->MaxWalkSpeed = 2.0f;
+		GetCharacterMovement()->GravityScale = 10.5f;
+		GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.8f; // 이동속도 20% 감소
 	}
 }
 
@@ -208,7 +418,7 @@ void AExiaCharacterBase::BlockingStateEnd()
 
 void AExiaCharacterBase::LoadCharacterData()
 {
-	if (CharacterDataTable == nullptr)
+	if (StatDataTable == nullptr)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CharacterDataTable is missing!"));
 		return;
@@ -217,7 +427,7 @@ void AExiaCharacterBase::LoadCharacterData()
 	if (StatDataTable)
 	{
 		static const FString ContextString(TEXT("Character Data Context"));
-		FGundamCharacterData* CharData = CharacterDataTable->FindRow<FGundamCharacterData>(CharacterRowName, ContextString);
+		FGundamCharacterData* CharData = StatDataTable->FindRow<FGundamCharacterData>(CharacterRowName, ContextString);
 		// 데이터를 찾았다면 변수에 할당
 		if (CharData)
 		{
@@ -249,6 +459,8 @@ void AExiaCharacterBase::StartFlying()
 {
 	if (bBlock) return;
 	
+	bIsFlying = true;
+	
 	if (GetCharacterMovement())
 	{
 		// 비행 시작
@@ -271,6 +483,16 @@ void AExiaCharacterBase::Landed(const FHitResult& Hit)
 	if (bIsJumpBoosting)
 	{
 		StopJumpDash();
+	}
+	
+	if (bIsFlying)
+	{
+		StopFlying(); 
+	}
+	
+	if (bIsBoosting)
+	{
+		StopBoost();
 	}
 	
 	GetCharacterMovement()->DisableMovement(); // 잠시 멈춤
@@ -361,27 +583,7 @@ void AExiaCharacterBase::SetWeaponCollisionEnabled(bool bEnabled)
 	}
 }
 
-void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
-										 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
-										 bool bFromSweep, const FHitResult& SweepResult)
-{
-	if (OtherActor == this || HitActors.Contains(OtherActor)) return;
 
-	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass()))
-	{
-		// [핵심] 칼날 박스 위치를 기본값으로 하되, 적 콜리전과 가장 가까운 접점을 찾습니다.
-		FVector HitPoint = WeaponCollision->GetComponentLocation();
-		if (OtherComp)
-		{
-			OtherComp->GetClosestPointOnCollision(WeaponCollision->GetComponentLocation(), HitPoint);
-		}
-
-		// 수정한 인터페이스 호출 (HitPoint를 마지막 인자로 전달)
-		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, 10.0f, this, FName("Body"), HitPoint);
-        
-		HitActors.Add(OtherActor);
-	}
-}
 
 void AExiaCharacterBase::EnableMovementCustom()
 {
@@ -393,6 +595,13 @@ void AExiaCharacterBase::UpdateFlight(float DeltaTime)
 	//비행 중 지속적으로 상승 힘 가하기
 	FVector BoostForce = FVector::UpVector * JumpBoostForce;
 	GetCharacterMovement()->AddForce(BoostForce);
+	float CurrentHeight = GetActorLocation().Z;
+	float MaxFlightHeight = 1000.f;
+	
+	if (CurrentHeight < MaxFlightHeight)
+	{
+		AddMovementInput(GetActorUpVector());
+	}
 	
 	//연료 소모 로직 들어갈 자리 아직 미구현
 }
@@ -400,6 +609,8 @@ void AExiaCharacterBase::UpdateFlight(float DeltaTime)
 
 void AExiaCharacterBase::StopFlying()
 {	
+	bIsFlying = false;
+	
 	// 비행 종료 시 중력 원상 복구
 	GetCharacterMovement()->GravityScale = DefaultGravityScale;
 	
@@ -421,6 +632,12 @@ float AExiaCharacterBase::GetGNParticlePercent_Implementation() const
 void AExiaCharacterBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	
+	// 가드 중이 아니고, 경직 상태가 아니며, 가드 체력이 깍여 있다면 회복모드
+	if (!bBlock && !bIsStunned && CurrentGuardHP < MaxGuardHP)
+	{
+		CurrentGuardHP = FMath::Min(CurrentGuardHP + (GuardRecoveryRate * DeltaTime), MaxGuardHP);
+	}
 	
 	// // 이동 입력이 있고 + 부스트 키가 눌려있을 때만 bIsBoosting을 참으로 유지
 	// bool bHasInput = GetLastMovementInputVector().Size() > 0.0f;
@@ -467,39 +684,39 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 }
 
 // Called to bind functionality to input
-void AExiaCharacterBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
-{
-	Super::SetupPlayerInputComponent(PlayerInputComponent);
-
-	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
-	{
-		if (JumpAction)
-		{
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartJumpBoost);
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::JumpBoosting);
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopJumpBoost);
-		}
-		
-		if (BoostAction)
-		{
-			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartBoost);
-			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Boosting);
-			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopBoost);
-		}
-
-		// 이동 바인딩 ( 2026-01-19 이동이 안되던 문제는 해당 로직의 누락으로 확인되어 2026-01-20 오전에 해당 로직을 추가하여 해결되었음. )
-		if (MoveAction)
-		{
-			EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Move);
-		}
-
-		// 회전 바인딩
-		if (LookAction)
-		{
-			EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Look);
-		}
-	}
-}
+// void AExiaCharacterBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+// {
+// 	Super::SetupPlayerInputComponent(PlayerInputComponent);
+//
+// 	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
+// 	{
+// 		if (JumpAction)
+// 		{
+// 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartJumpBoost);
+// 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::JumpBoosting);
+// 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopJumpBoost);
+// 		}
+// 		
+// 		if (BoostAction)
+// 		{
+// 			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Started, this, &AExiaCharacterBase::StartBoost);
+// 			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Boosting);
+// 			EnhancedInputComponent->BindAction(BoostAction, ETriggerEvent::Completed, this, &AExiaCharacterBase::StopBoost);
+// 		}
+//
+// 		// 이동 바인딩 ( 2026-01-19 이동이 안되던 문제는 해당 로직의 누락으로 확인되어 2026-01-20 오전에 해당 로직을 추가하여 해결되었음. )
+// 		if (MoveAction)
+// 		{
+// 			EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Move);
+// 		}
+//
+// 		// 회전 바인딩
+// 		if (LookAction)
+// 		{
+// 			EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AExiaCharacterBase::Look);
+// 		}
+// 	}
+// }
 
 void AExiaCharacterBase::SetCombatState(EGundamCombatState NewState)
 {
@@ -566,7 +783,7 @@ void AExiaCharacterBase::Jump()
 	{
 
 		FVector JumpDir = GetLastMovementInputVector();
-		float JumpUpForce = 1200.f;
+		float JumpUpForce = 6000.f;
 		float JumpForwardForce = 400.f;
 		
 		FVector LaunchVel = (JumpDir * JumpForwardForce) + FVector(0,0, JumpUpForce);
@@ -585,7 +802,7 @@ void AExiaCharacterBase::StartJumpDash()
 	{
 		bIsJumpBoosting = true;
 		
-		GetCharacterMovement()->GravityScale = 1.0f;
+		GetCharacterMovement()->GravityScale = DefaultGravityScale - 2.5f;
 		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
 		
 	}
@@ -675,45 +892,45 @@ void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
 	//if (CurrentStat.MaxGNParticles <= 0) StopBoost();
 }
 
-void AExiaCharacterBase::Move(const FInputActionValue& Value)
-{
-	FVector2D MovementVector = Value.Get<FVector2D>();
-	
-	if (bIsBraking) return;
-
-	// 디버그용
-	//UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
-	
-	if (Controller != nullptr)
-	{
-		// 컨트롤러의 회전 방향
-		const FRotator Rotation = Controller->GetControlRotation();
-		const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-		// 방향 벡터
-		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-		
-		AddMovementInput(ForwardDirection, MovementVector.Y);
-		AddMovementInput(RightDirection, MovementVector.X);
-		
-		// 디버그용: 수치가 0이 아닌지 확인
-		UE_LOG(LogTemp, Log, TEXT("MovementVector: %s"), *MovementVector.ToString());
-	}
-}
-
-void AExiaCharacterBase::Look(const FInputActionValue& Value)
-{
-	FVector2D LookAxisVector = Value.Get<FVector2d>();
-	
-	if (Controller != nullptr)
-	{ 
-		//마우스 좌우 움직임
-		AddControllerYawInput(LookAxisVector.X);
-		//마우스 상하 움직임
-		AddControllerPitchInput(LookAxisVector.Y);
-	}
-}
+// void AExiaCharacterBase::Move(const FInputActionValue& Value)
+// {
+// 	FVector2D MovementVector = Value.Get<FVector2D>();
+// 	
+// 	if (bIsBraking) return;
+//
+// 	// 디버그용
+// 	//UE_LOG(LogTemp, Log, TEXT("Move Input: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
+// 	
+// 	if (Controller != nullptr)
+// 	{
+// 		// 컨트롤러의 회전 방향
+// 		const FRotator Rotation = Controller->GetControlRotation();
+// 		const FRotator YawRotation(0, Rotation.Yaw, 0);
+//
+// 		// 방향 벡터
+// 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+// 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+// 		
+// 		AddMovementInput(ForwardDirection, MovementVector.Y);
+// 		AddMovementInput(RightDirection, MovementVector.X);
+// 		
+// 		// 디버그용: 수치가 0이 아닌지 확인
+// 		UE_LOG(LogTemp, Log, TEXT("MovementVector: %s"), *MovementVector.ToString());
+// 	}
+// }
+//
+// void AExiaCharacterBase::Look(const FInputActionValue& Value)
+// {
+// 	FVector2D LookAxisVector = Value.Get<FVector2d>();
+// 	
+// 	if (Controller != nullptr)
+// 	{ 
+// 		//마우스 좌우 움직임
+// 		AddControllerYawInput(LookAxisVector.X);
+// 		//마우스 상하 움직임
+// 		AddControllerPitchInput(LookAxisVector.Y);
+// 	}
+// }
 
 void AExiaCharacterBase::SetWarpTarget(AActor* TargetActor)
 {
@@ -729,9 +946,9 @@ void AExiaCharacterBase::SetWarpTarget(AActor* TargetActor)
 		LookAtRot.Roll = 0.0f;
 
 		// 적의 몸 속으로 파고들지 않게 적 위치에서 내 쪽으로 살짝 오프셋(간격) 주기
-		// 적과 나 사이의 방향 벡터를 구해서 약 60~80cm 정도 앞에서 멈추게 합니다.
+		// 적과 나 사이의 방향 벡터를 구해서 약 60~80cm 정도 앞에서 멈추 도록 설계
 		FVector Direction = (MyLocation - TargetLocation).GetSafeNormal();
-		FVector WarpLocation = TargetLocation + (Direction * 80.0f); 
+		FVector WarpLocation = TargetLocation + (Direction * 250.0f); 
 
 		// 워핑 타겟 업데이트
 		MotionWarpingComp->AddOrUpdateWarpTargetFromLocationAndRotation(
