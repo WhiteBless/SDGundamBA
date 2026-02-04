@@ -12,6 +12,7 @@ class SDGUNDAMBA_API UExiaAnimInstance : public UAnimInstance
 	GENERATED_BODY()
 public:
 	virtual void NativeUpdateAnimation (float DeltaSeconds) override;
+	virtual void NativeInitializeAnimation() override;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	float LocalVelocityForward;
@@ -29,13 +30,23 @@ public:
 	float LastDashRight;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
-	bool bIsFalling; // 공중에 떠 있는지 여부 (점프/추락 포함)
+	bool bIsFalling; 
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
-	bool bIsJumping; // 점프 버튼이 눌렸는지 여부
+	bool bIsJumping; 
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	bool bCanJump;
+	
+public:
+
+	// C++에서 미리 주인을 찾아놓고 여기에 저장합니다.
+	UPROPERTY(BlueprintReadOnly, Category = "Reference")
+	AExiaCharacterBase* OwnerCharacter;
+
+	// 블로킹(가드) 상태도 C++에서 처리합니다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
+	bool bAnim_Blocking;
 	
 public:
 	bool bIsAscending;

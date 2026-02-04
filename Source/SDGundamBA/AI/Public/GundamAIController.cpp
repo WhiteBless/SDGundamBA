@@ -1,14 +1,17 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "GundamAIController.h"
+#include "AI/Public/GundamAIController.h"
+
+#include "ExiaAICharacter.h"
+#include "ExiaCharacterBase.h" // 적 캐릭터(플레이어) 인식용
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "BehaviorTree/Blackboard/BlackboardKeyType_Object.h"
-#include "ExiaCharacterBase.h" // 적 캐릭터(플레이어) 인식용
+
 
 
 const FName AGundamAIController::Key_TargetActor(TEXT("TargetActor"));
@@ -16,6 +19,7 @@ const FName AGundamAIController::Key_HasLineOfSight(TEXT("HasLineOfSight"));
 
 AGundamAIController::AGundamAIController()
 {
+
 	BehaviorTreeComp = CreateDefaultSubobject<UBehaviorTreeComponent>(TEXT("BehaviorTreeComp"));
 	BlackboardComp = CreateDefaultSubobject<UBlackboardComponent>(TEXT("BlackboardComp"));
 	PerceptionComp = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("PerceptionComp"));
@@ -26,7 +30,7 @@ AGundamAIController::AGundamAIController()
 	{
 		SightConfig->SightRadius = 3000.0f; // 30미터 감지
 		SightConfig->LoseSightRadius = 3500.0f; // 35미터 벗어나면 놓침
-		SightConfig->PeripheralVisionAngleDegrees = 180.0f; // 시야각 (건담은 센서가 좋으므로 넓게)
+		SightConfig->PeripheralVisionAngleDegrees = 170.0f; // 시야각
 		
 		// 감지 대상 설정 (적, 중립, 아군 다 감지할지)
 		SightConfig->DetectionByAffiliation.bDetectEnemies = true;
@@ -43,38 +47,53 @@ void AGundamAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 	
-	return OnPossess(InPawn);
-	/* if (auto* GundamChar = Cast<AExiaCharacterBase>(InPawn))
+	if (AExiaAICharacter* AICharacter = Cast<AExiaAICharacter>(InPawn))
 	{
-		if (GundamChar->AIBehaviorTree && GundamChar->AIBehaviorTree->BlackboardAsset)
+		if (UBehaviorTree* BT = AICharacter->GetBehaviorTree())
 		{
-			BlackboardComp->InitializeBlackboard(*GundamChar->AIBehaviorTree->BlackboardAsset);
-			BehaviorTreeComp->StartTree(*GundamChar->AIBehaviorTree);
+			UseBlackboard(BT->BlackboardAsset, BlackboardComp);
+			
+			RunBehaviorTree(BT);
+			UE_LOG(LogTemp, Log, TEXT("AI Controller: Behavior Tree Started!"));
 		}
 	}
-	*/
+	
+	if (PerceptionComp)
+	{
+		PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AGundamAIController::OnTargetDetected);
+	}
+
 }
 
-void AGundamAIController::OnTargtDetected(AActor* Actor, FAIStimulus Stimulus)
+void AGundamAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
-	// 감지된게 플레이어 인가?
-	if (auto* EnemyCharacter = Cast<AExiaCharacterBase>(Actor))
+	// 1. 블랙보드 컴포넌트를 가져옵니다.
+	UBlackboardComponent* BlackboardPtr = GetBlackboardComponent();
+
+	// 혹시 모르니 블랙보드가 진짜 있는지 체크!
+	if (BlackboardPtr)
 	{
-		// 시야에 들어왔다면 (Stimulus.WasSuccessfullySensed() == true)
+		// 적을 성공적으로 감지했는가? (Yes)
 		if (Stimulus.WasSuccessfullySensed())
 		{
-			// 블랙보드에 타겟 등록 -> 이제 비헤이비어 트리와 EQS가 이 정보를 씀!
-			BlackboardComp->SetValueAsObject(Key_TargetActor, EnemyCharacter);
-			BlackboardComp->SetValueAsBool(Key_HasLineOfSight, true);
-			
-			UE_LOG(LogTemp, Warning, TEXT("AI: Target Detected! %s"), *EnemyCharacter->GetName());
+			// 블랙보드의 "TargetActor"라는 키(Key)에 감지한 대상을 저장!
+			BlackboardPtr->SetValueAsObject(TEXT("TargetActor"), Actor);
+            
+			UE_LOG(LogTemp, Warning, TEXT("적 발견! 추적을 시작합니다: %s"), *Actor->GetName());
 		}
+		// 적을 놓쳤는가? (No)
 		else
 		{
-			// 시야에서 사라짐
-			BlackboardComp->SetValueAsBool(Key_HasLineOfSight, false);
-			// 타겟 정보는 바로 지우지 않고, "마지막 위치"로 이동하게 하거나 추격하게 둡니다.
+			// 블랙보드를 비워서 추적을 멈추게 함
+			BlackboardPtr->SetValueAsObject(TEXT("TargetActor"), nullptr);
+            
+			UE_LOG(LogTemp, Warning, TEXT("적을 놓쳤습니다."));
 		}
 	}
 }
 
+FGenericTeamId AGundamAIController::GetGenericTeamId() const
+{
+	// 1번 팀(적군)이라고 알려줌
+	return FGenericTeamId(1);
+}

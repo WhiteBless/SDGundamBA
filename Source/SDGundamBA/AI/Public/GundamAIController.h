@@ -5,6 +5,9 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "Perception/AIPerceptionTypes.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "GenericTeamAgentInterface.h"
 #include "GundamAIController.generated.h"
 
 class UBehaviorTreeComponent;
@@ -23,12 +26,12 @@ class SDGUNDAMBA_API AGundamAIController : public AAIController
 public:
 	AGundamAIController();
 	
-protected:
+	virtual FGenericTeamId GetGenericTeamId() const override;
 	virtual void OnPossess(APawn* InPawn) override;
 	
-	void OnTargtDetected(AActor* Actor, FAIStimulus Stimulus);
+	UFUNCTION()
+	void OnTargetDetected(AActor* Actor, FAIStimulus Stimulus);
 	
-public:
 	//TODO Ai 컴포넌트
 	
 	// 비헤이비어 트리를 실행할 컴포넌트
@@ -48,7 +51,7 @@ public:
 	UAISenseConfig_Sight* SightConfig;
 
 	// --- [데이터 에셋 키 이름] ---
-	// 블랙보드에서 쓸 변수 이름들을 미리 정의 (오타 방지)
+	// 블랙보드에서 쓸 변수 이름들을 미리 정의
 	static const FName Key_TargetActor; // 타겟
 	static const FName Key_HasLineOfSight; // 시야 확보 여부
 };
