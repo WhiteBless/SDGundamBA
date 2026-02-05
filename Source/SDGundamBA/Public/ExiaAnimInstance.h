@@ -12,7 +12,6 @@ class SDGUNDAMBA_API UExiaAnimInstance : public UAnimInstance
 	GENERATED_BODY()
 public:
 	virtual void NativeUpdateAnimation (float DeltaSeconds) override;
-	virtual void NativeInitializeAnimation() override;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	float LocalVelocityForward;

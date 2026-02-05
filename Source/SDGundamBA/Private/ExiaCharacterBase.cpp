@@ -178,7 +178,10 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
     UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 	if (!AnimInstance) return;
 	if (bIsStunned) return;
-
+	
+	UE_LOG(LogTemp, Log, TEXT("=== ExecuteAttack 호출됨 (현재 콤보: %d, 공격중: %s) ==="), 
+			AttackComboCount, bIsAttacking ? TEXT("True") : TEXT("False"));
+	
 	if (bBlock)
 	{
 		StopGuard();
@@ -187,31 +190,40 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
     // 이미 공격 중일 때의 처리 (선입력 로직)
 	if (AnimInstance->Montage_IsPlaying(AttackMontage))
 	{
-		if (bIsBufferWindowOpen) 
+		if (bIsBufferWindowOpen  || bForceBufferInput) 
 		{
 			bHasBufferedInput = true;
 			UE_LOG(LogTemp, Warning, TEXT("Combo Buffered! Next Hit will trigger."));
 		}
 		return; 
 	}
-
-	bIsAttacking = true; 
-	bHasBufferedInput = false;
+	
+	if (bIsAttacking)
+	{
+		bHasBufferedInput = true;
+		bHasSavedComboInput = true;
+		UE_LOG(LogTemp, Warning, TEXT("Combo Buffered!"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("!! 선입력 구간이 아님: 예약 실패 !!"));
+	}
 	
     // 타겟 탐색 (Sphere Trace)
     FVector Start = GetActorLocation();
     FVector End = Start + (GetActorForwardVector() * 2500.0f); 
     float Radius = 300.0f; 
     
-    FCollisionObjectQueryParams ObjectQueryParams;
+	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::BossEnemy);
-
+	ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::GundamPlayer);
+	
     FHitResult HitResult;
     FCollisionQueryParams Params;
     Params.AddIgnoredActor(this);
 
     bool bHit = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity, ObjectQueryParams, FCollisionShape::MakeSphere(Radius), Params);
-
+	
     // 모션 워핑 설정
     if (bHit && HitResult.GetActor())
     {
@@ -227,9 +239,13 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
 
     // 탐색 범위 디버그 표시 (초록색 캡슐)
     FVector Center = Start + (GetActorForwardVector() * (500.0f * 0.5f));
-    DrawDebugCapsule(GetWorld(), Center, 250.0f, Radius, FQuat::Identity, FColor::Green, false, 1.0f);
+    DrawDebugCapsule(GetWorld(), Center, 150.0f, Radius, FQuat::Identity, FColor::Green, false, 1.0f);
 
-    // 4. 실제 공격 실행 (콤보 로직)
+	bIsAttacking = true; 
+	bHasBufferedInput = false;
+	AttackComboCount = 0;
+	
+    // 실제 공격 실행 (콤보 로직)
 	if (AttackMontage && ComboNames.IsValidIndex(AttackComboCount))
 	{
 		FName TargetSection = ComboNames[AttackComboCount];
@@ -246,9 +262,7 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
 		// 콤보 카운트 증가
 		AttackComboCount = (AttackComboCount + 1) % ComboNames.Num();
 	}
-	
-	UAnimInstance* ExiaAnimInstance = GetMesh()->GetAnimInstance();
-	if (!AnimInstance) return;
+	ProcessComboCommand();
 }
 
 void AExiaCharacterBase::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
@@ -603,7 +617,73 @@ void AExiaCharacterBase::UpdateFlight(float DeltaTime)
 		AddMovementInput(GetActorUpVector());
 	}
 	
-	//연료 소모 로직 들어갈 자리 아직 미구현
+	//TODO 연료 소모 로직 들어갈 자리 아직 미구현
+}
+
+void AExiaCharacterBase::CheckComboInput()
+{
+	// 저장된 입력이 있다면? -> 다음 콤보 실행!
+	if (bHasSavedComboInput)
+	{
+		ProcessComboCommand();
+	}
+}
+
+void AExiaCharacterBase::ProcessComboCommand()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (!AnimInstance) return;
+	if (bIsStunned) return;
+
+	if (AttackMontage && ComboNames.IsValidIndex(AttackComboCount))
+	{
+		FName TargetSection = ComboNames[AttackComboCount];
+        
+		// 몽타주 재생
+		AnimInstance->Montage_Play(AttackMontage, 1.0f);
+		AnimInstance->Montage_JumpToSection(TargetSection, AttackMontage);
+
+		// 애니메이션이 끝나면 OnAttackMontageEnded 함수가 실행되도록 연결
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindUObject(this, &AExiaCharacterBase::OnAttackMontageEnded);
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
+        
+		// 콤보 카운트 증가
+		AttackComboCount = (AttackComboCount + 1) % ComboNames.Num();
+	}
+	
+	bIsAttacking = true;
+	bHasSavedComboInput = false; // 입력 소모했으니 초기화
+}
+
+void AExiaCharacterBase::CheckNextCombo()
+{
+	// 저장된 입력이 없다면 그냥 종료
+	if (!bHasBufferedInput) return;
+
+	UE_LOG(LogTemp, Log, TEXT("--- CheckNextCombo 노티파이 발생 (예약됨: %s) ---"), 
+		bHasBufferedInput ? TEXT("True") : TEXT("False"));
+	
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (!AnimInstance || !AttackMontage) return;
+	
+	// 다음 콤보 섹션이 있는지 확인하고 점프
+	if (ComboNames.IsValidIndex(AttackComboCount))
+	{
+		FName TargetSection = ComboNames[AttackComboCount];
+        
+		// [로그] 실제로 콤보가 넘어가는지 확인용
+		UE_LOG(LogTemp, Log, TEXT("CheckNextCombo: Next Section Found -> %s"), *TargetSection.ToString());
+
+		AnimInstance->Montage_JumpToSection(TargetSection, AttackMontage);
+
+		// 다음 공격을 위해 카운트 증가 및 예약 해제
+		AttackComboCount++; 
+		bHasBufferedInput = false;
+        
+		// 공격 중 상태 유지
+		bIsAttacking = true;
+	}
 }
 
 
@@ -674,12 +754,12 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 		GetCharacterMovement()->AirControl = 2.0f;
 		
 		// 마찰력 증가 값
-		GetCharacterMovement()->BrakingDecelerationFalling = 2000.0f;
+		GetCharacterMovement()->BrakingDecelerationFalling = 6000.0f;
 	}
 	else
 	{
 		GetCharacterMovement()->AirControl = 0.35f;
-		GetCharacterMovement()->BrakingDecelerationFalling = 500.0f;
+		GetCharacterMovement()->BrakingDecelerationFalling = 1000.0f;
 	}
 }
 

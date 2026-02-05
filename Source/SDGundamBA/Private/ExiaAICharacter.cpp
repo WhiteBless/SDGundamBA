@@ -9,7 +9,7 @@ AExiaAICharacter::AExiaAICharacter()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	
 	AIControllerClass = AGundamAIController::StaticClass();
-	
+	bForceBufferInput = true;
 }
 
 UBehaviorTree* AExiaAICharacter::GetBehaviorTree() const

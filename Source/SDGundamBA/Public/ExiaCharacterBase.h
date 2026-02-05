@@ -52,10 +52,7 @@ protected:
 
 public:
 	// 블루프린트에서 호출할 공격 실행 함수
-	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
 	virtual void ExecuteAttack_Implementation() override; //void ExecuteAttack();
-	
-	
 
 	// 콤보 리셋 함수 (블루프린트의 ResettingComboAttack 대응)
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
@@ -71,6 +68,7 @@ public:
 protected:
 	bool bHasBufferedInput;
 	bool bIsBufferWindowOpen;
+	bool bForceBufferInput = false;
 
 public:
 	// Sets default values for this character's properties
@@ -334,6 +332,17 @@ protected:
 	
 	// 매 프레임 연료 체크 및 추력 적용
 	void UpdateFlight(float DeltaTime);
+public:
+	// 노티파이에서 호출할 함수
+	void CheckComboInput();
+	void ProcessComboCommand();
+	
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	void CheckNextCombo();
+
+protected:
+	// 공격 입력이 들어왔었는지 저장하는 플래그
+	bool bHasSavedComboInput;
 	
 public:
 	// 인터페이스 구현 ( 상태 정보 확인 )
@@ -342,7 +351,7 @@ public:
 	
 	// 데이터 로드 함수
 	void LoadCharacterData();
-public:	
+	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
