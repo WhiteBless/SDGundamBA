@@ -25,14 +25,19 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
 	TArray<FName> ComboNames;
 
-	// 현재 콤보 카운트 (블루프린트의 AttackComboCount 대응) [cite: 5]
+	// 현재 콤보 카운트
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
 	int32 AttackComboCount = 0;
 
-	// 공격 중 여부 (블루프린트의 Attacking 대응) [cite: 15]
+public:
+	// 공격 중 여부
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
 	bool bIsAttacking = false;
 	
+protected:
+	//가드 콜리전 박스
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	class UBoxComponent* GuardCollision;
 	
 	// 공격 몽타주 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
@@ -291,8 +296,6 @@ protected:
 	// 데이터 테이블 행 이름
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Data")
 	FName CharacterRowName;
-
-	// --- 실제 사용할 스탯 변수들 ---
     
 	// 변하는 체력
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stat")
@@ -310,6 +313,12 @@ protected:
 	// 가드 상태 정의
 	UPROPERTY(BlueprintReadWrite, Category = "States")
 	bool bBlock;
+	
+	// 가드 콜리전에 무언가 부딪혔을 때 실행될 함수
+	UFUNCTION()
+	void OnGuardOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, 
+						UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
+						bool bFromSweep, const FHitResult& SweepResult);
 	
 	void BlockingStateStart();
 	void BlockingStateEnd();
@@ -345,9 +354,10 @@ protected:
 	bool bHasSavedComboInput;
 	
 public:
-	// 인터페이스 구현 ( 상태 정보 확인 )
-	virtual float GetHPPercent_Implementation() const override;
+	// 인터페이스 구현
+	virtual float GetHPPercent_Implementation() const override; 
 	virtual float GetGNParticlePercent_Implementation() const override;
+	virtual float GetGuardPercent_Implementation() const override;
 	
 	// 데이터 로드 함수
 	void LoadCharacterData();

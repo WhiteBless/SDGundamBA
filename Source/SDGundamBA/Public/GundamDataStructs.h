@@ -15,6 +15,18 @@ struct FGundamCharacterData : public FTableRowBase
 	GENERATED_BODY()
 	
 public:
+	//최대 가드 내구도
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float MaxGuardHP;
+	
+	//현재 가드 내구도
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float CurrentGuardHP;
+	
+	//가드 회복 속도 (초당)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
+	float GuardRecoveryRate;
+	
 	//생존 관련 스텟 정의
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat")
 	float MaxHP;
@@ -70,6 +82,7 @@ public:
 		: MaxHP(2000.f), MoveSpeed(700.f), GNParticles(300.f), JumpZVelocity(900.f), BoostSpeedMultiplier(2.5f)
 		, BoostConsumptionRate(20.f), bHasTransAm(false), TransAmDuration(15.f), DefaultGravityScale(4.5)
 		, AttackPower(10), DefensePower(2.2), GuardDamageReduction(0.5)
+		, MaxGuardHP(1000.f), CurrentGuardHP(1000.f), GuardRecoveryRate(20.f)
 	{}
 };
 class SDGUNDAMBA_API GundamDataStructs

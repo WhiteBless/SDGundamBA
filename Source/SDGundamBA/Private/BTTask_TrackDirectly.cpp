@@ -63,16 +63,22 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 	
 	UCharacterMovementComponent* MoveComp = AIChar->GetCharacterMovement();
     
-	// 타겟이 나보다 2미터(200) 이상 높이 있으면 -> 비행 모드
-	if (DirToTarget.Z > 200.0f) 
+	//TODO 개선해야 할것.
+	// 타겟이 나보다 높이 있으면 -> 비행 모드 전환
+	// 플레이어의 상태를 읽어와서 전환할 필요가 있음
+	// 높이 값으로 하니 정밀하지 않음.
+	// 내가 부스트 상태면 동일하게 부스트 상태로 전환해 플레이어를 추적해야하며
+	// 점프 또는 공중 상태일때는 동일한 모션 모드로 전환할 필요가 있음.
+	if (DirToTarget.Z > 10.0f) 
 	{
 		if (MoveComp->MovementMode != MOVE_Flying)
 		{
 			MoveComp->SetMovementMode(MOVE_Flying);
 		}
 	}
+	
 	// 타겟과 높이가 비슷하거나 낮으면 -> 걷기 모드 (땅으로 착지)
-	else if (FMath::Abs(DirToTarget.Z) < 100.0f)
+	else if (FMath::Abs(DirToTarget.Z) < 200.0f)
 	{
 		// 공중에 떠있는 상태라면 다시 걷기로 전환
 		if (MoveComp->MovementMode == MOVE_Flying)

@@ -33,7 +33,6 @@ public:
 	void OnTargetDetected(AActor* Actor, FAIStimulus Stimulus);
 	
 	//TODO Ai 컴포넌트
-	
 	// 비헤이비어 트리를 실행할 컴포넌트
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
 	UBehaviorTreeComponent* BehaviorTreeComp;

@@ -30,7 +30,7 @@ AGundamAIController::AGundamAIController()
 	{
 		SightConfig->SightRadius = 3000.0f; // 30미터 감지
 		SightConfig->LoseSightRadius = 3500.0f; // 35미터 벗어나면 놓침
-		SightConfig->PeripheralVisionAngleDegrees = 170.0f; // 시야각
+		SightConfig->PeripheralVisionAngleDegrees = 150.0f; // 시야각
 		
 		// 감지 대상 설정 (적, 중립, 아군 다 감지할지)
 		SightConfig->DetectionByAffiliation.bDetectEnemies = true;
@@ -67,21 +67,21 @@ void AGundamAIController::OnPossess(APawn* InPawn)
 
 void AGundamAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
-	// 1. 블랙보드 컴포넌트를 가져옵니다.
+	// 블랙보드 컴포넌트를 가져옵니다.
 	UBlackboardComponent* BlackboardPtr = GetBlackboardComponent();
 
-	// 혹시 모르니 블랙보드가 진짜 있는지 체크!
+	// 블랙보드가 있는지 먼저 체크
 	if (BlackboardPtr)
 	{
-		// 적을 성공적으로 감지했는가? (Yes)
+		// 적을 성공적으로 감지했는지
 		if (Stimulus.WasSuccessfullySensed())
 		{
-			// 블랙보드의 "TargetActor"라는 키(Key)에 감지한 대상을 저장!
+			// 블랙보드의 "TargetActor"라는 키(Key)에 감지한 대상을 저장
 			BlackboardPtr->SetValueAsObject(TEXT("TargetActor"), Actor);
             
 			UE_LOG(LogTemp, Warning, TEXT("적 발견! 추적을 시작합니다: %s"), *Actor->GetName());
 		}
-		// 적을 놓쳤는가? (No)
+		// 적을 감지 하지 못할 경우
 		else
 		{
 			// 블랙보드를 비워서 추적을 멈추게 함

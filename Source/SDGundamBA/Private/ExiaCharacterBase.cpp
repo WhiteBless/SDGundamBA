@@ -8,6 +8,8 @@
 // #include "EnhancedInputSubsystems.h"
 
 #include "ExiaCharacterBase.h"
+
+#include "BrainComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "MotionWarpingComponent.h"
 #include "InputAction.h"
@@ -15,6 +17,7 @@
 #include "Components/BoxComponent.h"
 #include "Engine/DataTable.h"
 #include "SDGundamBA.h"
+#include "AI/Public/GundamAIController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 // Sets default values
@@ -51,6 +54,12 @@ AExiaCharacterBase::AExiaCharacterBase()
 	CurrentGNParticles = 200.0f;
 	
 	GetCharacterMovement()->JumpZVelocity = 900.f;
+	
+	// 가드 콜리전
+	GuardCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("GuardCollision"));
+	GuardCollision->SetupAttachment(GetMesh(), FName("ShieldSocket")); // 방패나 팔 소켓에 부착
+	GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 기본은 꺼둠
+	GuardCollision->SetCollisionProfileName(TEXT("BlockAllDynamic")); // 투사체와 충돌 가능하도록 설정
 }
 
 void AExiaCharacterBase::BeginPlay()
@@ -58,9 +67,13 @@ void AExiaCharacterBase::BeginPlay()
 	Super::BeginPlay();
 	LoadCharacterData();
 	
-	//TODO 시작 시 가드 체력
-	CurrentGuardHP = MaxGuardHP; 
+	//가드 콜리전
+	if (GuardCollision)
+	{
+		GuardCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnGuardOverlap);
+	}
 	
+	//무기 콜리전
 	if (WeaponCollision)
 	{
 		WeaponCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnWeaponOverlap);
@@ -103,8 +116,12 @@ void AExiaCharacterBase::ResetGuardCooldown()
 void AExiaCharacterBase::StartGuard()
 {
 	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (!AnimInstance) return;
 	
+	// 공중 상태라면 가드 불가
+	if (GetCharacterMovement()->IsFalling()) return;
+	
+	if (!AnimInstance || bIsStunned || !bCanGuard || bBlock) return;
+
 	if (AnimInstance->Montage_IsPlaying(AttackMontage))
 	{
 		return; 
@@ -113,163 +130,155 @@ void AExiaCharacterBase::StartGuard()
 	if (bIsAttacking && !AnimInstance->Montage_IsPlaying(AttackMontage))
 	{
 		bIsAttacking = false;
-		UE_LOG(LogTemp, Warning, TEXT("Fixed Stuck State: bIsAttacking Forced to False inside Guard"));
 	}
-	
-	if (bIsStunned || bIsAttacking || !bCanGuard || GetCharacterMovement()->IsFalling() || bBlock) return;
 	
 	bBlock = true;
-
-	if (GuardMontage)
-	{
-		// 몽타주 재생
-		PlayAnimMontage(GuardMontage, 1.0f, GuardLoopSectionName);
-	}
+	
+	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(false);
+	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.85f;
 	
 	// 이펙트(GN 필드) 보이게 설정 (Hidden = false)
 	if (GuardShieldMesh)
 	{
 		GuardShieldMesh->SetHiddenInGame(false);
 	}
+	
+	if (GuardMontage)
+	{
+		// 몽타주 재생
+		PlayAnimMontage(GuardMontage, 1.0f, GuardLoopSectionName);
+	}
 
-	// 이동 속도 감소 (방어 자세니 느리게)
-	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.85f;
-
-	UE_LOG(LogTemp, Log, TEXT("Guard UP! Effect On."));
+	UE_LOG(LogTemp, Log, TEXT("가드 활성화 상태."));
 }
 
 void AExiaCharacterBase::StopGuard()
 {
 	// 이미 가드가 풀려있다면 패스
 	if (!bBlock) return;
-
+	
 	// 가드 상태 해제
 	bBlock = false;
 	
-	if (GuardMontage)
+	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+	
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && GuardMontage)
 	{
-		// 현재 재생 중인 몽타주가 내 가드 몽타주라면 멈춤
-		if (GetMesh()->GetAnimInstance()->Montage_IsPlaying(GuardMontage))
-		{
-			StopAnimMontage(GuardMontage);
-		}
+		// 0.2초 여유를 두고 부드럽게 기본 포즈로 돌아갑니다.
+		AnimInstance->Montage_Stop(0.2f, GuardMontage);
 	}
 	
 	// 이펙트 숨기기 (Hidden = true)
-	if (GuardShieldMesh)
-	{
-		GuardShieldMesh->SetHiddenInGame(true);
-	}
-
+	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
+	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	
 	// 이동 속도 복구
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
 
-	// 쿨타임 적용 (가드 연타 방지)
+	// 쿨타임 타이머
 	bCanGuard = false;
-	GetWorld()->GetTimerManager().ClearTimer(GuardCooldownTimer);
 	GetWorld()->GetTimerManager().SetTimer(GuardCooldownTimer, this, &AExiaCharacterBase::ResetGuardCooldown, GuardCooldownTime, false);
-
-	UE_LOG(LogTemp, Warning, TEXT("Guard Cooldown Started (%f sec)"), GuardCooldownTime);
 }
 
 void AExiaCharacterBase::ExecuteAttack_Implementation()
 {
     // 상태 체크
     UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (!AnimInstance) return;
-	if (bIsStunned) return;
-	
-	UE_LOG(LogTemp, Log, TEXT("=== ExecuteAttack 호출됨 (현재 콤보: %d, 공격중: %s) ==="), 
-			AttackComboCount, bIsAttacking ? TEXT("True") : TEXT("False"));
-	
+    if (!AnimInstance || bIsStunned) return;
+
+    UE_LOG(LogTemp, Log, TEXT("=== ExecuteAttack 호출됨 (현재 콤보: %d) ==="), AttackComboCount);
+
 	if (bBlock)
 	{
-		StopGuard();
-	}
-
-    // 이미 공격 중일 때의 처리 (선입력 로직)
-	if (AnimInstance->Montage_IsPlaying(AttackMontage))
-	{
-		if (bIsBufferWindowOpen  || bForceBufferInput) 
-		{
-			bHasBufferedInput = true;
-			UE_LOG(LogTemp, Warning, TEXT("Combo Buffered! Next Hit will trigger."));
-		}
-		return; 
-	}
-	
-	if (bIsAttacking)
-	{
-		bHasBufferedInput = true;
-		bHasSavedComboInput = true;
-		UE_LOG(LogTemp, Warning, TEXT("Combo Buffered!"));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("!! 선입력 구간이 아님: 예약 실패 !!"));
-	}
-	
-    // 타겟 탐색 (Sphere Trace)
-    FVector Start = GetActorLocation();
-    FVector End = Start + (GetActorForwardVector() * 2500.0f); 
-    float Radius = 300.0f; 
-    
-	FCollisionObjectQueryParams ObjectQueryParams;
-	ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::BossEnemy);
-	ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::GundamPlayer);
-	
-    FHitResult HitResult;
-    FCollisionQueryParams Params;
-    Params.AddIgnoredActor(this);
-
-    bool bHit = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity, ObjectQueryParams, FCollisionShape::MakeSphere(Radius), Params);
-	
-    // 모션 워핑 설정
-    if (bHit && HitResult.GetActor())
-    {
-        SetWarpTarget(HitResult.GetActor());
+		bBlock = false;;
+		if (AnimInstance && GuardMontage) AnimInstance->Montage_Stop(0.1f, GuardMontage);
         
-        // 디버그 표시 (타겟 발견 시 빨간색)
-        DrawDebugSphere(GetWorld(), HitResult.GetActor()->GetActorLocation(), 30.0f, 12, FColor::Red, false, 2.0f);
+		if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
+		if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        
+		GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+		
+		bCanGuard = true;
+	}
+
+    // AI 포커스 또는 Sweep으로 타겟 찾기
+    AActor* BestTarget = nullptr;
+
+    // AI인 경우 컨트롤러가 보고 있는 대상을 우선 타겟으로 설정
+    if (!IsPlayerControlled())
+    {
+        if (AAIController* AIC = Cast<AAIController>(GetController()))
+        {
+            BestTarget = AIC->GetFocusActor();
+        }
+    }
+
+    // 타겟이 없거나 플레이어인 경우 기존 Sweep(Sphere Trace)으로 찾기
+    if (!BestTarget)
+    {
+        FVector Start = GetActorLocation();
+        FVector End = Start + (GetActorForwardVector() * 2500.0f);
+        float Radius = 300.0f;
+
+        FCollisionObjectQueryParams ObjectQueryParams;
+        ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::BossEnemy);
+        ObjectQueryParams.AddObjectTypesToQuery(GundamCollision::GundamPlayer);
+
+        FHitResult HitResult;
+        FCollisionQueryParams Params;
+        Params.AddIgnoredActor(this);
+
+        bool bHit = GetWorld()->SweepSingleByObjectType(HitResult, Start, End, FQuat::Identity, ObjectQueryParams, FCollisionShape::MakeSphere(Radius), Params);
+        
+        if (bHit) BestTarget = HitResult.GetActor();
+
+        // [디버그용] 탐색 범위 표시
+        DrawDebugCapsule(GetWorld(), Start + (GetActorForwardVector() * 250.0f), 150.0f, Radius, FQuat::Identity, FColor::Green, false, 1.0f);
+    }
+
+    // 3. 모션 워핑 타겟 설정 (찾은 타겟이 있다면)
+    if (BestTarget)
+    {
+        SetWarpTarget(BestTarget);
+        DrawDebugSphere(GetWorld(), BestTarget->GetActorLocation(), 30.0f, 12, FColor::Red, false, 2.0f);
     }
     else
     {
         SetWarpTarget(nullptr);
     }
 
-    // 탐색 범위 디버그 표시 (초록색 캡슐)
-    FVector Center = Start + (GetActorForwardVector() * (500.0f * 0.5f));
-    DrawDebugCapsule(GetWorld(), Center, 150.0f, Radius, FQuat::Identity, FColor::Green, false, 1.0f);
+    // 4. 공격 실행 및 선입력(Combo Buffer) 처리
+    if (AnimInstance->Montage_IsPlaying(AttackMontage))
+    {
+        // 공격 중이라면 다음 공격 예약
+        if (bIsBufferWindowOpen || bForceBufferInput) 
+        {
+            bHasBufferedInput = true;
+            UE_LOG(LogTemp, Warning, TEXT("Combo Buffered!"));
+        }
+        return; 
+    }
 
-	bIsAttacking = true; 
-	bHasBufferedInput = false;
-	AttackComboCount = 0;
-	
-    // 실제 공격 실행 (콤보 로직)
-	if (AttackMontage && ComboNames.IsValidIndex(AttackComboCount))
-	{
-		FName TargetSection = ComboNames[AttackComboCount];
-        
-		// 몽타주 재생
-		AnimInstance->Montage_Play(AttackMontage, 1.0f);
-		AnimInstance->Montage_JumpToSection(TargetSection, AttackMontage);
-
-		// 애니메이션이 끝나면 OnAttackMontageEnded 함수가 실행되도록 연결
-		FOnMontageEnded EndDelegate;
-		EndDelegate.BindUObject(this, &AExiaCharacterBase::OnAttackMontageEnded);
-		AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
-        
-		// 콤보 카운트 증가
-		AttackComboCount = (AttackComboCount + 1) % ComboNames.Num();
-	}
-	ProcessComboCommand();
+    // 5. 실제 첫 공격 시작
+    bIsAttacking = true; 
+    bHasBufferedInput = false;
+    AttackComboCount = 0;
+    
+    // 콤보 명령 처리 함수 호출 (실제 몽타주 재생 로직이 들어있는 함수)
+    ProcessComboCommand();
 }
 
 void AExiaCharacterBase::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// 공격 몽타주가 끝났으니 공격 상태 해제
-	bIsAttacking = false;
-	UE_LOG(LogTemp, Warning, TEXT("Attack Ended. bIsAttacking = false"));
+	if (Montage == AttackMontage)
+	{
+		bIsAttacking = false;
+		AttackComboCount = 0;
+		UE_LOG(LogTemp, Log, TEXT("Attack State Cleared."));
+	}
 }
 
 void AExiaCharacterBase::ResettingComboAttack()
@@ -302,12 +311,26 @@ void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AA
 
 void AExiaCharacterBase::OnGuardBreak()
 {
-	StopGuard();
+	bBlock = false;
 	bIsStunned = true;
 	
-	if (GuardBreakMontage)
+	if (GuardMontage)
 	{
-		PlayAnimMontage(GuardBreakMontage);
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		if (AnimInstance)
+		{
+			// 가드 중이던 몽타주에서 바로 경직 섹션으로 점프합니다.
+			AnimInstance->Montage_JumpToSection(FName("GuardBreak"), GuardMontage);
+		}
+	}
+	
+	if (AAIController* AIC = Cast<AAIController>(GetController()))
+	{
+		if (UBrainComponent* BrainComp = AIC->GetBrainComponent())
+		{
+			// "Stunned"라는 이유로 로직을 일시 정지시킵니다.
+			BrainComp->PauseLogic(TEXT("Stunned")); 
+		}
 	}
 	
 	UE_LOG(LogTemp, Error, TEXT("!!! GUARD BREAK !!! Stunned for %f seconds"), StunDuration);
@@ -321,9 +344,18 @@ void AExiaCharacterBase::RecoverFromStun()
 {
 	bIsStunned = false;
 	
-	CurrentGuardHP = MaxGuardHP * 0.3f;
+	CurrentStat.CurrentGuardHP = CurrentStat.MaxGuardHP * 0.3f;
 	
-	UE_LOG(LogTemp, Log, TEXT("Recovered from Stun."));
+	// 스턴 해재 AI로직 재개
+	if (AAIController* AIC = Cast<AAIController>(GetController()))
+	{
+		if (UBrainComponent* BrainComp = AIC->GetBrainComponent())
+		{
+			BrainComp->ResumeLogic(TEXT("Stunned Recovery"));
+		}
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("AI Recovered from Stun. Logic Resumed."));
 }
 
 void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
@@ -332,84 +364,78 @@ void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
 
 void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation)
 {
-	// IGundamCombatInterface::ApplyGundamDamage_Implementation(DamageAmount, Attacker, HitBoneName, HitLocation);
 	if (CurrentHP <= 0.0f) return;
-	
-	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);;
-		
-	
-	// 경직(Stun) 상태라면 무조건 데미지 100% (가드 불가)
+
+	// 방어력을 적용한 실제 데미지 계산
+	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);
+
+	// 피격 상태 판별 (스턴 > 가드 > 일반 피격 순서)
+    
+	// 경직(Stun) 상태: 가드 불가, 100% 데미지
 	if (bIsStunned)
 	{
 		CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, MaxHP);
-		// 필요하다면 여기서도 피격 모션 재생
-		if (HitMontage) PlayAnimMontage(HitMontage);
-		return;
+		UE_LOG(LogTemp, Warning, TEXT("Stunned Hit! Damage: %f"), DamageAmount);
 	}
-	
-	if (bBlock)
+	// 가드(Block) 상태: 체력 대신 가드 게이지 차감
+	else if (bBlock)
 	{
-		// 가드 게이지 차감
-		CurrentGuardHP -= DamageAmount;
-        
+		CurrentGuardHP -= DamageAmount; // 가드는 방어력 적용 전 수치로 차감
 		UE_LOG(LogTemp, Warning, TEXT("Blocked! Guard HP: %f / %f"), CurrentGuardHP, MaxGuardHP);
 
-		// 가드 브레이크 체크
 		if (CurrentGuardHP <= 0.0f)
 		{
 			CurrentGuardHP = 0.0f;
-			OnGuardBreak();
+			OnGuardBreak(); // 가드 브레이크 발생
 		}
-		else
-		{
-			// 가드는 성공했지만 이펙트 등 출력
-			// (이미 구현하신 가드 이펙트가 나올 것임)
-		}
+        
+		// 가드 성공 시 함수 종료 (체력 차감 방지)
+		return; 
 	}
-	else // 가드 아님 -> 본체 데미지
+	// 일반 피격 상태
+	else 
 	{
-		float FinalDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);
-        
-		// 체력 차감
-		CurrentHP = FMath::Clamp(CurrentHP - FinalDamage, 0.0f, MaxHP);
-        
-		UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f, CurrentHP: %f"), FinalDamage, CurrentHP);
-
-		// 피격 모션 재생
-		if (HitMontage) PlayAnimMontage(HitMontage);
+		CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
+		UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f, CurrentHP: %f"), ActualDamage, CurrentHP);
 	}
-	
-	CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
-    
-	// 로그 확인
-	UE_LOG(LogTemp, Warning, TEXT("%s took %f Damage. Current HP: %f"), *GetName(), ActualDamage, CurrentHP);
-	
+
+	// 3. 사망 판정
 	if (CurrentHP <= 0.0f)
 	{
-		//TODO 사망판정 로직 작성 예정
-		// OnDeath(); // 사망 모션 재생 함수 호출 등
+		CurrentHP = 0.0f;
 		UE_LOG(LogTemp, Error, TEXT("%s Destroyed!"), *GetName());
+		// OnDeath(); // 사망 로직 호출
+		return;
 	}
-	
+
+	// 피격 애니메이션 및 방향 처리
 	if (HitMontage && Attacker)
 	{
-		//TODO 슈퍼아머 로직 (공격중)체크
-		
-		// 공격자의 방향 벡터
+		// 슈퍼아머 상태라면 애니메이션 재생 건너뛰기 로직 추가 가능
+        
 		FVector ToAttacker = Attacker->GetActorLocation() - GetActorLocation();
 		ToAttacker.Normalize();
-		
+        
 		float ForwardDot = FVector::DotProduct(GetActorForwardVector(), ToAttacker);
-		
-		FName SectionName = (ForwardDot >= 0) ? FName("Hit_Front") : FName("Hit_Back");
+        
+		// 정면/후면 섹션 결정 (ForwardDot > 0 이면 정면)
+		FName SectionName = (ForwardDot >= 0.5f) ? FName("Hit_Front") : FName("Hit_Back");
 
-		// 섹션이 존재하면 재생
 		PlayAnimMontage(HitMontage, 1.0f, SectionName);
 	}
+}
+
+void AExiaCharacterBase::OnGuardOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (OtherActor && OtherActor != this)
+	{
+		// 1. 부딪힌 액터가 투사체(미사일 등)인지 확인 (인터페이스나 클래스 체크)
+		// 2. 투사체라면 폭발 이펙트를 이 위치(SweepResult.ImpactPoint)에서 재생
+		// 3. 본체에 전달될 대미지를 가드 대미지로 변환하여 적용
+		UE_LOG(LogTemp, Warning, TEXT("Projectile Blocked by Shield Collision!"));	
+	}
 	
-	// 2. HP 차감 (로그 확인용)
-	CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, MaxHP);
-	UE_LOG(LogTemp, Warning, TEXT("Hit! HP Left: %f"), CurrentHP);
 }
 
 void AExiaCharacterBase::BlockingStateStart()
@@ -446,6 +472,8 @@ void AExiaCharacterBase::LoadCharacterData()
 		if (CharData)
 		{
 			CurrentStat = *CharData;
+			CurrentStat.CurrentGuardHP = CurrentStat.MaxGuardHP; // LoadCharcterDate를 불러올때 현재 가드HP를 MaxGuardHP에 맞춰 풀 충전
+			
 			auto* Movement = GetCharacterMovement();
 			if (Movement)
 			{
@@ -597,8 +625,6 @@ void AExiaCharacterBase::SetWeaponCollisionEnabled(bool bEnabled)
 	}
 }
 
-
-
 void AExiaCharacterBase::EnableMovementCustom()
 {
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
@@ -698,14 +724,24 @@ void AExiaCharacterBase::StopFlying()
 	GetCharacterMovement()->BrakingDecelerationFalling = 0.0f;
 }
 
+// 체력 퍼센트 반환
 float AExiaCharacterBase::GetHPPercent_Implementation() const
 {
-	return (CurrentStat.MaxHP > 0) ? (1.0f) : 0.0f; //현재 HP로직 추가 전 임시 반환
+	return (MaxHP > 0.0f) ? (CurrentHP / MaxHP) : 0.0f;
 }
 
+// 부스트(GN입자) 퍼센트 반환
 float AExiaCharacterBase::GetGNParticlePercent_Implementation() const
 {
-	return 1.0f; //임시 반환
+	// CurrentStat.GNParticles가 최대치, CurrentGNParticles가 현재치입니다
+	return (CurrentStat.GNParticles > 0.0f) ? (CurrentGNParticles / CurrentStat.GNParticles) : 0.0f;
+}
+
+// 가드 게이지 퍼센트 반환
+float AExiaCharacterBase::GetGuardPercent_Implementation() const
+{
+	// 구조체 내의 CurrentGuardHP와 MaxGuardHP를 사용합니다
+	return (CurrentStat.MaxGuardHP > 0.0f) ? (CurrentStat.CurrentGuardHP / CurrentStat.MaxGuardHP) : 0.0f;
 }
 
 // Called every frame

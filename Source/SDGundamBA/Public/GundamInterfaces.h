@@ -40,6 +40,11 @@ public:
 	
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Gundam | State")
 	float GetGNParticlePercent() const;
+	
+	// 가드 게이지 퍼센트 추가
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Gundam | State")
+	float GetGuardPercent() const;
+
 };
 
 UINTERFACE(MinimalAPI, Blueprintable)
