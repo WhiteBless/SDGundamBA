@@ -37,8 +37,7 @@ AExiaCharacterBase::AExiaCharacterBase()
 	WeaponCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("WeaponCollision"));
 	WeaponCollision->SetupAttachment(GetMesh(), FName("Forearm_WeaponSocket_R"));
 	WeaponCollision->SetCollisionProfileName(TEXT("GN_Sword"));
-	WeaponCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	
+
 	// CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	// CameraComp->SetupAttachment(SpringArmComp);
 	
@@ -307,6 +306,10 @@ void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AA
         
 		HitActors.Add(OtherActor);
 	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("Target %s does not have GundamCombatInterface!"), OtherActor ? *OtherActor->GetName() : TEXT("NULL"));
+	}
 }
 
 void AExiaCharacterBase::OnGuardBreak()
@@ -364,6 +367,8 @@ void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
 
 void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation)
 {
+	UE_LOG(LogTemp, Error, TEXT("DAMAGE RECEIVED! Amount: %f"), DamageAmount);
+	
 	if (CurrentHP <= 0.0f) return;
 
 	// 방어력을 적용한 실제 데미지 계산
@@ -492,8 +497,8 @@ void AExiaCharacterBase::LoadCharacterData()
 			GetCharacterMovement()->MaxWalkSpeed = CharData->MoveSpeed;
 			
 			UE_LOG(LogTemp, Log, TEXT("Data Loaded! MaxHP: %f"), MaxHP);
+			UE_LOG(LogTemp, Warning, TEXT("Row [%s] Loaded! Actual MaxHP: %f"), *CharacterRowName.ToString(), MaxHP);
 		}
-	
 	}
 }
 
