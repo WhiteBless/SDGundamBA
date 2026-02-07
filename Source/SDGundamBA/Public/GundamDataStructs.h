@@ -45,7 +45,7 @@ public:
 
     // 기본 방어력 (데미지 차감 수치)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Combat")
-    float DefensePower = 10.0f;
+    float DefensePower;
 
     // 가드 시 데미지 감소율 (0.0 ~ 1.0) 
     // 예: 0.3이면 30%만 받고 70%는 막음. 0.0이면 완전 방어.
@@ -75,7 +75,7 @@ public:
 	float BoostConsumptionRate;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Boost")
-	float FlightGravityScale = 0.5f;
+	float FlightGravityScale;
 	
 	//생성자  -- 기본 값을 정의 --
 	FGundamCharacterData()

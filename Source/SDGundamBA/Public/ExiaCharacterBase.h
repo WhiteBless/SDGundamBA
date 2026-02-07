@@ -110,7 +110,7 @@ public:
 	
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
-	float MaxGuardHP = 100.0f;
+	float MaxGuardHP;
 
 	// 현재 가드 내구도
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
