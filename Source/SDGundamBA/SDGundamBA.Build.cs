@@ -15,6 +15,7 @@ public class SDGundamBA : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",
+			"NavigationSystem",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
@@ -22,7 +23,7 @@ public class SDGundamBA : ModuleRules
 			"MotionWarping"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "OpenCV" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SDGundamBA",

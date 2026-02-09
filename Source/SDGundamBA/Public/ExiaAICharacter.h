@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "ExiaCharacterBase.h"
 #include "BehaviorTree/BehaviorTree.h"
+#include "GundamDataStructs.h"
 #include "ExiaAICharacter.generated.h"
 
 /**
@@ -23,4 +24,8 @@ public:
 	// 비헤이비어 트리를 반환하는 함수 선언
 	UBehaviorTree* GetBehaviorTree() const;
 	
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "AI | State")
+	EGundamAICombatState AICombatState = EGundamAICombatState::Waiting;
+	
+	void SetAICombatState(EGundamAICombatState NewState);
 };

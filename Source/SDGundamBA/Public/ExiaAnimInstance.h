@@ -37,8 +37,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	bool bCanJump;
 	
-public:
-
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	bool bIsFlying;
+	
 	// C++에서 미리 주인을 찾아놓고 여기에 저장합니다.
 	UPROPERTY(BlueprintReadOnly, Category = "Reference")
 	AExiaCharacterBase* OwnerCharacter;
@@ -47,6 +48,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State")
 	bool bAnim_Blocking;
 	
-public:
 	bool bIsAscending;
+	
+protected:
+	UPROPERTY(BlueprintReadOnly, Category = "Movement")
+	float GroundSpeed;
 };

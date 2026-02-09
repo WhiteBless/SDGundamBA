@@ -50,7 +50,7 @@ AExiaCharacterBase::AExiaCharacterBase()
 	
 	JumpMaxHoldTime = 0.0f;
 	
-	CurrentGNParticles = 200.0f;
+	CurrentGNParticles = 300.0f;
 	
 	GetCharacterMovement()->JumpZVelocity = 900.f;
 	
@@ -132,7 +132,11 @@ void AExiaCharacterBase::StartGuard()
 	}
 	
 	bBlock = true;
-	
+	//회복 타이머가 돌고 있는 상태라면 중지 시키기.
+	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+	//gn입자 소모
+	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.08f, true);
+		
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(false);
 	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.85f;
@@ -148,7 +152,7 @@ void AExiaCharacterBase::StartGuard()
 		// 몽타주 재생
 		PlayAnimMontage(GuardMontage, 1.0f, GuardLoopSectionName);
 	}
-
+	
 	UE_LOG(LogTemp, Log, TEXT("가드 활성화 상태."));
 }
 
@@ -156,9 +160,12 @@ void AExiaCharacterBase::StopGuard()
 {
 	// 이미 가드가 풀려있다면 패스
 	if (!bBlock) return;
-	
 	// 가드 상태 해제
 	bBlock = false;
+	
+	//소모 타이머 중지
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 	
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
@@ -174,9 +181,6 @@ void AExiaCharacterBase::StopGuard()
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
 	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	
-	// 이동 속도 복구
-	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
-
 	// 쿨타임 타이머
 	bCanGuard = false;
 	GetWorld()->GetTimerManager().SetTimer(GuardCooldownTimer, this, &AExiaCharacterBase::ResetGuardCooldown, GuardCooldownTime, false);
@@ -300,9 +304,9 @@ void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AA
 		{
 			OtherComp->GetClosestPointOnCollision(WeaponCollision->GetComponentLocation(), HitPoint);
 		}
-
-		// 수정한 인터페이스 호출 (HitPoint를 마지막 인자로 전달)
-		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, 10.0f, this, FName("Body"), HitPoint);
+		
+		//TODO 데미지 전달 로직
+		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, CurrentStat.AttackPower, this, FName("Body"), HitPoint);
         
 		HitActors.Add(OtherActor);
 	}
@@ -338,6 +342,18 @@ void AExiaCharacterBase::OnGuardBreak()
 	
 	UE_LOG(LogTemp, Error, TEXT("!!! GUARD BREAK !!! Stunned for %f seconds"), StunDuration);
 
+	//소모 타이머 중지
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	
+	if (CurrentGNParticles < CurrentStat.GNParticles)
+	{
+		GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
+	}
+	
+	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
+	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+	
 	// 일정 시간 뒤 경직 해제 타이머 설정
 	FTimerHandle StunTimerHandle;
 	GetWorld()->GetTimerManager().SetTimer(StunTimerHandle, this, &AExiaCharacterBase::RecoverFromStun, StunDuration, false);
@@ -347,18 +363,18 @@ void AExiaCharacterBase::RecoverFromStun()
 {
 	bIsStunned = false;
 	
-	CurrentStat.CurrentGuardHP = CurrentStat.MaxGuardHP * 0.3f;
+	//CurrentStat.CurrentGuardHP = CurrentStat.MaxGuardHP * 0.3f;
 	
 	// 스턴 해재 AI로직 재개
 	if (AAIController* AIC = Cast<AAIController>(GetController()))
 	{
 		if (UBrainComponent* BrainComp = AIC->GetBrainComponent())
 		{
-			BrainComp->ResumeLogic(TEXT("Stunned Recovery"));
+			BrainComp->ResumeLogic(TEXT("Stunned"));
 		}
 	}
 	
-	UE_LOG(LogTemp, Log, TEXT("AI Recovered from Stun. Logic Resumed."));
+	UE_LOG(LogTemp, Log, TEXT("Recovered from Stun!"));
 }
 
 void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
@@ -404,7 +420,7 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 		UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f, CurrentHP: %f"), ActualDamage, CurrentHP);
 	}
 
-	// 3. 사망 판정
+	// 사망 판정
 	if (CurrentHP <= 0.0f)
 	{
 		CurrentHP = 0.0f;
@@ -412,20 +428,23 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 		// OnDeath(); // 사망 로직 호출
 		return;
 	}
-
+	
+	UE_LOG(LogTemp, Log, TEXT("Stunned: %s, CanHit: %s"), bIsStunned ? TEXT("True") : TEXT("False"), bCanPlayHitReaction ? TEXT("True") : TEXT("False"));
+	
 	// 피격 애니메이션 및 방향 처리
 	if (HitMontage && Attacker)
 	{
 		// 슈퍼아머 상태라면 애니메이션 재생 건너뛰기 로직 추가 가능
-        
+
+		// if (!bIsStunned && bCanPlayHitReaction)
+		// {
+		// }
 		FVector ToAttacker = Attacker->GetActorLocation() - GetActorLocation();
 		ToAttacker.Normalize();
-        
 		float ForwardDot = FVector::DotProduct(GetActorForwardVector(), ToAttacker);
-        
 		// 정면/후면 섹션 결정 (ForwardDot > 0 이면 정면)
 		FName SectionName = (ForwardDot >= 0.5f) ? FName("Hit_Front") : FName("Hit_Back");
-
+			
 		PlayAnimMontage(HitMontage, 1.0f, SectionName);
 	}
 }
@@ -527,6 +546,9 @@ void AExiaCharacterBase::Landed(const FHitResult& Hit)
 	bHasJumpDashUsed = false;
 	bCanJump = false;
 	
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
+	
 	if (bIsJumpBoosting)
 	{
 		StopJumpDash();
@@ -554,9 +576,28 @@ void AExiaCharacterBase::ResetJumpLock()
 
 void AExiaCharacterBase::UpdateBoostEnergy()
 {
+	// 0보다 작아지지 않도록 예외 처리
+	if (CurrentGNParticles <= 0.0f)
+	{
+		CurrentGNParticles = 0.0f;
+		StopBoost();
+		return;
+	}
+	
 	// 0.1초당 소모량만큼 차감
-	float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.1f);
+	float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.01f); 
 	CurrentGNParticles -= ConsumeAmount;
+	
+	if (CurrentGNParticles <= 0.0f)
+	{
+		CurrentGNParticles = 0.0f;
+		StopBoost();
+	}
+	
+	if (GetVelocity().Size2D() < 50.0f)
+	{
+		StopBoost();
+	}
 	
 	// 부스트 지속 시간 확인
 	float BoostTime = GetWorldTimerManager().GetTimerElapsed(BoostTimerHandle);
@@ -592,7 +633,7 @@ void AExiaCharacterBase::UpdateBoostEnergy()
 void AExiaCharacterBase::RecoverGNParticles()
 {
 	float RecoveryRate = CurrentStat.BoostConsumptionRate * 0.8f;
-	float RecoveryAmount = RecoveryRate * 0.1f;
+	float RecoveryAmount = RecoveryRate * 0.2f;
 	
 	CurrentGNParticles += RecoveryAmount;
 	
@@ -862,6 +903,12 @@ void AExiaCharacterBase::StartJumpBoost()
 	// 짧게 누를때 대응
 	Jump(); 
 	bIsJumpBoosting = true;
+	
+	//회복 타이머가 돌고 있는 상태라면 중지 시키기.
+	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+	
+	//gn입자 소모
+	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
 }
 
 void AExiaCharacterBase::JumpBoosting()
@@ -886,6 +933,10 @@ void AExiaCharacterBase::StopJumpBoost()
 	//키를 떼면 점프 중단 및 부스트 상태 해제
 	StopJumping();
 	bIsJumpBoosting = false;
+	
+	//소모 타이머 중지
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	
 }
 
 void AExiaCharacterBase::Jump()
@@ -926,6 +977,12 @@ void AExiaCharacterBase::StartJumpDash()
 		GetCharacterMovement()->GravityScale = DefaultGravityScale - 2.5f;
 		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
 		
+		//회복 타이머가 돌고 있는 상태라면 중지 시키기.
+		GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+
+		//gn입자 소모
+		GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
+		
 	}
 }
 
@@ -935,6 +992,10 @@ void AExiaCharacterBase::StopJumpDash()
 	bIsJumping = false;
 	
 	GetCharacterMovement()->GravityScale = DefaultGravityScale;
+	
+	//소모 타이머 중지
+	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 }
 
 void AExiaCharacterBase::StartBoost()
@@ -982,8 +1043,6 @@ void AExiaCharacterBase::Boosting()
 	
 	// GN입자 실시간 소모
 	float DeltaTime = GetWorld()->GetDeltaSeconds();
-	
-	ConsumeGNParticles(DeltaTime);
 }
 
 void AExiaCharacterBase::StopBoost()
@@ -994,6 +1053,7 @@ void AExiaCharacterBase::StopBoost()
 		
 	// 소모 타이머 중지
 	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
+	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 	
 	//속도 원복
 	bUseControllerRotationYaw = false;

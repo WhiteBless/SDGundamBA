@@ -6,6 +6,15 @@
 #include "Engine/DataTable.h"
 #include "GundamDataStructs.generated.h"
 
+UENUM(BlueprintType)
+enum class EGundamAICombatState : uint8
+{
+	Waiting     UMETA(DisplayName = "Waiting"),   // 새로운 대기 상태 추가
+	Jumping     UMETA(DisplayName = "Jumping"),	  // 점프
+	Boosting    UMETA(DisplayName = "Boosting"),  // 부스트 상태
+	Exploring   UMETA(DisplayName = "Exploring"), // 순찰/이동
+	Combat      UMETA(DisplayName = "Combat")     // 전투 중
+};
 /**
  * 엑시아 및 모든 기체의 공통 스탯 구조체를 설계하는 공간
  */

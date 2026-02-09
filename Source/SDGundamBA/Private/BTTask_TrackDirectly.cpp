@@ -6,7 +6,11 @@
 #include "AIController.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GundamDataStructs.h"
+#include "ExiaAICharacter.h"
 #include "DrawDebugHelpers.h"
+#include "NavigationPath.h"
+#include "NavigationSystem.h"
 
 UBTTask_TrackDirectly::UBTTask_TrackDirectly()
 {
@@ -30,12 +34,12 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 	Super::TickTask(OwnerComp, NodeMemory, DeltaSeconds);
 	
 	AAIController* AIController = OwnerComp.GetAIOwner();
-	ACharacter* AIChar = Cast<ACharacter>(AIController->GetPawn());
+	AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(AIController->GetPawn());
     
 	// 블랙보드에서 타겟(TargetActor) 가져오기
 	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
 	AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(GetSelectedBlackboardKey()));
-	
+
 	UE_LOG(LogTemp, Warning, TEXT("태스크 실행 중... 타겟: %s"), 
 	TargetActor ? *TargetActor->GetName() : TEXT("없음(NULL)"));
 	
@@ -51,25 +55,55 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 	FVector TargetLoc = TargetActor->GetActorLocation();
 	FVector DirToTarget = TargetLoc - MyLoc;
 	float DistToTarget = DirToTarget.Size();
+	UCharacterMovementComponent* MoveComp = AIChar->GetCharacterMovement();
+
+	bool bTargetInAir = OwnerComp.GetBlackboardComponent()->GetValueAsBool(FName("bIsTargetInAir"));
 	
-	// 사거리 안에 들어왔으면 성공 종료 (이제 공격하세요!)
-	if (DistToTarget <= AcceptanceRadius)
+	if (bTargetInAir)
 	{
-		// 멈추기 위해 입력을 끊음
-		AIChar->GetCharacterMovement()->StopMovementImmediately();
-		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
-		return;
+		if (MoveComp->MovementMode == MOVE_Flying)
+		{
+			// 공중일 때는 기존처럼 직선 추격
+			MoveComp->SetMovementMode(MOVE_Flying);
+		}
+		
+		FVector Dir = TargetLoc - MyLoc;
+		AIChar->AddMovementInput(Dir.GetSafeNormal(), 1.0f);
+	}
+
+	else
+	{
+		if (MoveComp->MovementMode == MOVE_Flying && !MoveComp->IsFalling())
+		{
+			MoveComp->SetMovementMode(MOVE_Walking);
+		}
+		// 지상일 때는 네비게이션 시스템에 "길"을 물어봅니다.
+		UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+		UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(GetWorld(), MyLoc, TargetLoc);
+
+		// 갈 수 있는 길(PathPoints)이 있고 장애물이 있다면
+		if (NavPath && NavPath->PathPoints.Num() > 1)
+		{
+			// 바로 다음 길목(Index 1)을 향해 방향 벡터를 설정합니다.
+			DirToTarget = NavPath->PathPoints[1] - MyLoc;
+		}
+		else
+		{
+			// 길이 없으면 직선으로 시도
+			DirToTarget = TargetLoc - MyLoc;
+		}
 	}
 	
-	UCharacterMovementComponent* MoveComp = AIChar->GetCharacterMovement();
-    
+	FVector FinalDir = DirToTarget.GetSafeNormal(); 
+	AIChar->AddMovementInput(FinalDir, 1.0f);
+	
 	//TODO 개선해야 할것.
 	// 타겟이 나보다 높이 있으면 -> 비행 모드 전환
 	// 플레이어의 상태를 읽어와서 전환할 필요가 있음
 	// 높이 값으로 하니 정밀하지 않음.
 	// 내가 부스트 상태면 동일하게 부스트 상태로 전환해 플레이어를 추적해야하며
 	// 점프 또는 공중 상태일때는 동일한 모션 모드로 전환할 필요가 있음.
-	if (DirToTarget.Z > 10.0f) 
+	if (FMath::Abs(DirToTarget.Z) > 200.0f) 
 	{
 		if (MoveComp->MovementMode != MOVE_Flying)
 		{
@@ -77,16 +111,28 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 		}
 	}
 	
-	// 타겟과 높이가 비슷하거나 낮으면 -> 걷기 모드 (땅으로 착지)
-	else if (FMath::Abs(DirToTarget.Z) < 200.0f)
+	else if (FMath::Abs(DirToTarget.Z) < 100.0f && MoveComp->MovementMode == MOVE_Flying)
 	{
-		// 공중에 떠있는 상태라면 다시 걷기로 전환
-		if (MoveComp->MovementMode == MOVE_Flying)
-		{
-			MoveComp->SetMovementMode(MOVE_Walking);
-		}
+		MoveComp->SetMovementMode(MOVE_Walking);
 	}
 	
+	if (DistToTarget > 1000.0f)
+	{
+		// 거리가 멀면 부스트 상태로 전환하여 빠르게 접근
+		AIChar->SetAICombatState(EGundamAICombatState::Boosting);
+	}
+	
+	// 사거리 안에 들어왔으면 종료
+	if (DistToTarget <= AcceptanceRadius)
+	{
+		MoveComp->StopMovementImmediately();
+		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+		return;
+	}
+
+	FVector MoveDir = DirToTarget.GetSafeNormal();
+	AIChar->AddMovementInput(MoveDir, 1.0f);
+
 	DirToTarget.Normalize(); // 방향만 남기고 정규화
     
 	// AI 입력

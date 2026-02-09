@@ -3,41 +3,72 @@
 
 #include "BTService_CheckDefense.h"
 #include "AIController.h"
+#include "ExiaAICharacter.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 UBTService_CheckDefense::UBTService_CheckDefense()
 {
 	NodeName = TEXT("Check Player Attack for Defense");
-	Interval = 0.2;
+	Interval = 0.2f;
 	RandomDeviation = 0.05f;
+
+	// 가드 확률 기본값 (헤더에 선언되어 있어야 합니다)
+	GuardChance = 30.0f; 
 }
 
 void UBTService_CheckDefense::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
-	
-	AAIController* AIC = OwnerComp.GetAIOwner();
-	AExiaCharacterBase* AIChar = Cast<AExiaCharacterBase>(AIC->GetPawn());
-
 	// 블랙보드에서 타겟을 가져오기
 	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
-	AActor* Target = Cast<AActor>(BB->GetValueAsObject(GetSelectedBlackboardKey()));
+	if (!BB) return;
 	
-	if (AIChar && Target)
+	AActor* TargetActor = Cast<AActor>(BB->GetValueAsObject(GetSelectedBlackboardKey()));
+	AExiaCharacterBase* PlayerChar = Cast<AExiaCharacterBase>(TargetActor);
+	
+	AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(OwnerComp.GetAIOwner()->GetPawn());
+	
+	if (PlayerChar)
 	{
-		AExiaCharacterBase* PlayerChar = Cast<AExiaCharacterBase>(OwnerComp.GetAIOwner());
+		bool bInAir = PlayerChar->GetCharacterMovement()->IsFalling();
+		BB->SetValueAsBool(FName("bIsTargetInAir"), bInAir);
+	}
+	
+	if (AIChar && PlayerChar)
+	{
+		bool bPlayerAttacking = PlayerChar->GetIsAttacking();
+		bool bAIBlocking = AIChar->GetIsBlocking();
 		
-		if (PlayerChar && PlayerChar->bIsAttacking) 
+		if (bPlayerAttacking)
 		{
+			if (bAIBlocking) 
+			{
+				CurrentGuardTime += DeltaSeconds; // 가드 중이라면 시간 누적
+				return;
+			}
 			// 이미 가드 중이 아닌 경우 확률 적으로 가드 시작
 			//매 틱마다 확률 계산을 하면 가드를 올렸다 내렸다 할 수 있으므로 조건 추가
-			if (!AIChar->IsBoosting() && FMath::RandRange(0.0f, 100.0f) < GuardChance)
+
+			if (!AIChar->IsBoosting() && FMath::FRandRange(0.0f, 100.0f) < GuardChance)
 			{
 				AIChar->StartGuard();
+				CurrentGuardTime = 0.0f;
 			}
-			else
+		}
+		else
+		{
+			// 플레이어가 공격을 멈췄을때
+			if (bAIBlocking)
 			{
-				AIChar->StopGuard();
+				CurrentGuardTime += DeltaSeconds;
+				// 현재 가드를 진행한 시간이 최대 보장되는 가드 시간보다 값이 커질 경우
+				if (CurrentGuardTime >= MinGuardDuration)
+				{
+					AIChar->StopGuard(); //가드 해제
+					CurrentGuardTime = 0.0f; //가드 타임 0초로 초기화
+				}
+
 			}
 		}
 	}

@@ -30,7 +30,7 @@ AGundamAIController::AGundamAIController()
 	{
 		SightConfig->SightRadius = 3000.0f; // 30미터 감지
 		SightConfig->LoseSightRadius = 3500.0f; // 35미터 벗어나면 놓침
-		SightConfig->PeripheralVisionAngleDegrees = 150.0f; // 시야각
+		SightConfig->PeripheralVisionAngleDegrees = 170.0f; // 시야각
 		
 		// 감지 대상 설정 (적, 중립, 아군 다 감지할지)
 		SightConfig->DetectionByAffiliation.bDetectEnemies = true;

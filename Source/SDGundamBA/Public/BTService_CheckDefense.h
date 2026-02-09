@@ -21,4 +21,10 @@ protected:
 	// 에디터에서 조절할 가드 확률 (0~100)
 	UPROPERTY(EditAnywhere, Category = "AI")
 	float GuardChance = 60.0f;
+	
+	//TODO 지능적인 가드 시간 조율 고도화 필수 상황따라 다르게 가드를 펼치도록
+	UPROPERTY(EditAnywhere, Category = "AI")
+	float MinGuardDuration = 1.0f;
+	
+	float CurrentGuardTime = 0.0f;
 };

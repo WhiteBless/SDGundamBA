@@ -81,6 +81,13 @@ public:
 
 	void OpenInputBuffer();
 	void CloseInputBuffer();
+
+	//TODO 변수의 값을 외부 서버스 또는 태스크에서 읽어올 수 있도록 함수선언
+	FORCEINLINE bool GetIsAttacking() const { return bIsAttacking; }
+	FORCEINLINE bool GetIsBlocking() const { return bBlock; }
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	bool bCanPlayHitReaction = false;
 	
 	// 가드 이펙트용 스태틱 메쉬 (GN 필드)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

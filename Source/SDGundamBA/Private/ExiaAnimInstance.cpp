@@ -8,26 +8,42 @@
 void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
-
     auto Pawn = TryGetPawnOwner();
-    if (!IsValid(Pawn)) return;
-
-    // AI 캐릭터도 AExiaCharacterBase를 상속받았다고 가정합니다.
     AExiaCharacterBase* Character = Cast<AExiaCharacterBase>(Pawn);
+    
+    if (Character == nullptr) return;
+    if (!IsValid(Pawn)) return;
+    
+    if (auto* Movement = Character->GetCharacterMovement())
+    {
+        GroundSpeed = Character->GetVelocity().Size2D();
+        bIsFalling = Movement->IsFalling();
+        
+        bIsFlying = (Movement->MovementMode == EMovementMode::MOVE_Flying);
+    }
+    
     if (Character)
     {
-        // 1. 기본 상태 업데이트
+        // 기본 상태 업데이트
         bIsBoosting = Character->IsBoosting();
         bIsJumping = Character->bIsJumping;
         bCanJump = Character->bCanJump;
         
-        // 2. 무브먼트 컴포넌트 데이터 갱신
+        // 무브먼트 컴포넌트 데이터 갱신
         if (auto* Movement = Character->GetCharacterMovement())
         {
             bIsFalling = Movement->IsFalling();
             bIsAscending = Pawn->GetVelocity().Z > 10.f;
         }
-
+        
+        // AI가 플라잉 상태인지를 저장
+        // TODO 허공 걷기 모션 해결책
+        if (auto* Movement = Character->GetCharacterMovement())
+        {
+            bIsFalling = Movement->IsFalling();
+            bIsFlying = (Movement->MovementMode == EMovementMode::MOVE_Flying);
+        }
+        
         // 3. 이동 벡터 계산 (AI와 플레이어 공용 로직)
         // 플레이어: 키보드 입력(InputVector) 사용
         FVector InputVector = Character->GetLastMovementInputVector(); 
