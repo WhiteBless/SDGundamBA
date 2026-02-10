@@ -44,12 +44,11 @@ void UExiaAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
             bIsFlying = (Movement->MovementMode == EMovementMode::MOVE_Flying);
         }
         
-        // 3. 이동 벡터 계산 (AI와 플레이어 공용 로직)
+        // 이동 벡터 계산 (AI와 플레이어 공용 로직)
         // 플레이어: 키보드 입력(InputVector) 사용
         FVector InputVector = Character->GetLastMovementInputVector(); 
         FVector CurrentVelocity = Pawn->GetVelocity();
         
-        // [AI 호환성 패치] 
         // AI는 키보드 입력이 없으므로(InputVector가 0), 
         // 실제로 움직이고 있다면(Velocity가 있다면) 속도 방향을 입력값으로 간주합니다.
         if (InputVector.IsNearlyZero() && CurrentVelocity.SizeSquared2D() > 1.0f)

@@ -66,6 +66,11 @@ void AExiaPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		
 		EnhancedInputComponent->BindAction(DashAction, ETriggerEvent::Triggered, this, &AExiaPlayerCharacter::StartBoost);
 		EnhancedInputComponent->BindAction(DashAction, ETriggerEvent::Completed, this, &AExiaPlayerCharacter::StopBoost);
+	
+		if (FireAction)
+		{
+			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &AExiaPlayerCharacter::Input_Fire);
+		}
 	}
 }
 
@@ -96,6 +101,25 @@ void AExiaPlayerCharacter::Look(const FInputActionValue& Value)
 	{
 		AddControllerYawInput(LookAxisVector.X);
 		AddControllerPitchInput(LookAxisVector.Y);
+	}
+}
+
+void AExiaPlayerCharacter::Input_Fire(const FInputActionValue& Value)
+{
+	if (bIsStunned || bBlock || bIsAttacking || bIsJumping) return;\
+
+	if (RangedAttackMontage)
+	{
+		if (!GetMesh()->GetAnimInstance()->Montage_IsPlaying(RangedAttackMontage))
+		{
+			PlayAnimMontage(RangedAttackMontage);
+			
+			// 발사체 생성 '노티파이'
+		}
+	}
+	else
+	{
+		FireRangedWeapon(nullptr);
 	}
 }
 

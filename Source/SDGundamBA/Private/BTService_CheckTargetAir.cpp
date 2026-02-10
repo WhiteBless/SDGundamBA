@@ -28,6 +28,6 @@ void UBTService_CheckTargetAir::TickNode(UBehaviorTreeComponent& OwnerComp, uint
 		
 		BB->SetValueAsBool(FName("bIsTargetInAir"), bIsInAir);
 		
-		UE_LOG(LogTemp, Log, TEXT("Target In Air: %s"), bIsInAir ? TEXT("TRUE") : TEXT("FALSE"));
+		//UE_LOG(LogTemp, Log, TEXT("Target In Air: %s"), bIsInAir ? TEXT("TRUE") : TEXT("FALSE"));
 	}
 }

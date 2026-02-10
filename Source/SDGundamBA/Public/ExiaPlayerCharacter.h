@@ -42,8 +42,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* LookAction;
 
-	// UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	// UInputAction* ProjectileAttackAction; // 원거리 공격
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	class UInputAction* FireAction;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | Combat")
+	UAnimMontage* RangedAttackMontage;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* AttackComboAction; // 콤보 공격
@@ -65,6 +68,7 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
+	void Input_Fire(const FInputActionValue& Value);
 	
 	// 점프, 공격, 가드 등은 부모(Base)의 함수를 그대로 호출하거나 여기서 감쌈
 	void Input_StartJump();

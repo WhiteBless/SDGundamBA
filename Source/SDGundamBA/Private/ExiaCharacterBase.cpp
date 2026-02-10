@@ -9,15 +9,19 @@
 
 #include "ExiaCharacterBase.h"
 
+#include "AExiaProjectile.h"
 #include "BrainComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "MotionWarpingComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "InputAction.h"
 #include "DrawDebugHelpers.h"
 #include "Components/BoxComponent.h"
 #include "Engine/DataTable.h"
 #include "SDGundamBA.h"
 #include "AI/Public/GundamAIController.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SphereComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 // Sets default values
@@ -44,8 +48,8 @@ AExiaCharacterBase::AExiaCharacterBase()
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
 
 	GuardShieldMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GuardShieldMesh"));
-	GuardShieldMesh->SetupAttachment(GetMesh()); // 캐릭터 메쉬에 부착 (소켓 연결 추천)
-	GuardShieldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision); // 충돌은 없게 (판정은 bBlock변수로 하니까)
+	GuardShieldMesh->SetupAttachment(GetMesh()); // 캐릭터 메쉬에 부착
+	GuardShieldMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GuardShieldMesh->SetHiddenInGame(true); // 게임 시작 시에는 숨김
 	
 	JumpMaxHoldTime = 0.0f;
@@ -78,20 +82,11 @@ void AExiaCharacterBase::BeginPlay()
 		WeaponCollision->OnComponentBeginOverlap.AddDynamic(this, &AExiaCharacterBase::OnWeaponOverlap);
 	}
 
-	// if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	// {
-	// 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-	// 	{
-	// 		if (DefaultMappingContext)
-	// 		{
-	// 			Subsystem->AddMappingContext(DefaultMappingContext, 0);
-	// 		}
-	// 		else
-	// 		{
-	// 			UE_LOG(LogTemp, Error, TEXT("DefaultMappingContext가 할당되지 않았습니다!"));
-	// 		}
-	// 	}
-	// }
+	if (CurrentGuardHP <= 0.0f && MaxGuardHP > 0.0f)
+	{
+		CurrentGuardHP = MaxGuardHP;
+		UE_LOG(LogTemp, Warning, TEXT("GuardHP Forcibly Initialized to %f"), CurrentGuardHP);
+	}
 }
 
 void AExiaCharacterBase::OpenInputBuffer()
@@ -132,11 +127,7 @@ void AExiaCharacterBase::StartGuard()
 	}
 	
 	bBlock = true;
-	//회복 타이머가 돌고 있는 상태라면 중지 시키기.
-	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
-	//gn입자 소모
-	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.08f, true);
-		
+	
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(false);
 	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.85f;
@@ -162,10 +153,6 @@ void AExiaCharacterBase::StopGuard()
 	if (!bBlock) return;
 	// 가드 상태 해제
 	bBlock = false;
-	
-	//소모 타이머 중지
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 	
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
@@ -284,6 +271,77 @@ void AExiaCharacterBase::OnAttackMontageEnded(UAnimMontage* Montage, bool bInter
 	}
 }
 
+void AExiaCharacterBase::FireRangedWeapon(AActor* Target)
+{
+	if (!RangedProjectileClass) return;
+	
+	FVector SpawnLocation = GetActorLocation();
+	FRotator SpawnRotation = GetActorRotation();
+	FTransform SpawnTransform(SpawnRotation, SpawnLocation);
+
+	if (GetMesh()->DoesSocketExist(MuzzleSocketName))
+	{
+		SpawnLocation = GetMesh()->GetSocketLocation(MuzzleSocketName);
+		SpawnRotation = GetMesh()->GetSocketRotation(MuzzleSocketName);
+	}
+	
+	if (Target)
+	{
+		FVector TargetLocation = Target->GetActorLocation();
+		
+		TargetLocation.Z += 50.0f; 
+
+		// 총구 위치에서 타겟을 바라보는 회전값 계산
+		FVector DirToTarget = (TargetLocation - SpawnLocation).GetSafeNormal();
+		SpawnRotation = DirToTarget.Rotation();
+	}
+	
+	else if (IsPlayerControlled())
+		{
+			FRotator ControlRot = GetControlRotation();
+			SpawnRotation = ControlRot;
+		}
+		
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.Instigator = this;
+		
+	AExiaProjectile* Projectile = GetWorld()->SpawnActorDeferred<AExiaProjectile>(
+			RangedProjectileClass, 
+			SpawnTransform, 
+			this, // Owner
+			this, // Instigator
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn
+		);
+	
+	if (Projectile)
+	{
+		// 2. 물리 엔진이 돌기 전에, 변수부터 안전하게 넣어준다!
+		Projectile->ShooterActor = this;  // 이제 OnHit에서 이 값을 확실히 알 수 있음
+		Projectile->DamageAmount = CurrentStat.AttackPower * 0.45f;
+
+		// 타겟 유도 설정
+		if (Target)
+		{
+			Projectile->SetHomingTarget(Target);
+		}
+
+		// [핵심] 생성 전에 미리 충돌 무시 설정
+		if (Projectile->CollisionComp)
+		{
+			Projectile->CollisionComp->IgnoreActorWhenMoving(this, true);
+			// 캡슐 컴포넌트도 무시하게 설정
+			GetCapsuleComponent()->IgnoreActorWhenMoving(Projectile, true); 
+		}
+
+		// 3. 모든 준비가 끝났으니 이제 진짜로 소환해라! (FinishSpawning)
+		// 이 함수가 호출되는 순간 BeginPlay가 실행되고 물리 충돌이 시작됩니다.
+		UGameplayStatics::FinishSpawningActor(Projectile, SpawnTransform);
+	}
+    
+	UE_LOG(LogTemp, Log, TEXT("Fired Projectile via Deferred Spawn!"));
+}
+
 void AExiaCharacterBase::ResettingComboAttack()
 {
 	AttackComboCount = 0; // 
@@ -294,20 +352,72 @@ void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AA
 										 UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, 
 										 bool bFromSweep, const FHitResult& SweepResult)
 {
+	//[로그] 일단 무언가에 닿기는 했는지 확인
+	UE_LOG(LogTemp, Warning, TEXT("Overlap Detected! OtherActor: %s"), *OtherActor->GetName());
+
 	if (OtherActor == this || HitActors.Contains(OtherActor)) return;
 
 	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass()))
 	{
-		// [핵심] 칼날 박스 위치를 기본값으로 하되, 적 콜리전과 가장 가까운 접점을 찾습니다.
+		// 칼날 박스 위치를 기본값으로 하되, 적 콜리전과 가장 가까운 접점을 찾습니다.
 		FVector HitPoint = WeaponCollision->GetComponentLocation();
 		if (OtherComp)
 		{
 			OtherComp->GetClosestPointOnCollision(WeaponCollision->GetComponentLocation(), HitPoint);
 		}
 		
-		//TODO 데미지 전달 로직
-		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, CurrentStat.AttackPower, this, FName("Body"), HitPoint);
-        
+		// [로그] 닿은 물체가 인터페이스를 가지고 있는지 확인
+		bool bHasInterface = OtherActor && OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass());
+		if (!bHasInterface)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Hit Actor %s does NOT have Interface!"), *OtherActor->GetName());
+		}
+		
+		// 콤보당 데미지 가산 로직
+		float DamageMultiplier = 1.0f; //데미지 배율 기본값
+		switch (AttackComboCount)
+		{
+		case 1: // 1콤보 40%~80%의 데미지만 적용
+			DamageMultiplier = FMath::RandRange(0.4, 0.8);
+			break;
+		case 2: // 2콤보 90%데미지에서 최대 110%까지
+			DamageMultiplier = FMath::RandRange(0.9f, 1.1f);
+			break;
+		case 3: // 3콤보 120%~225%까지 가산
+			DamageMultiplier = FMath::RandRange(1.2f, 2.25f);
+		}
+		
+			
+		// 타격 이펙트 재생
+		if (HitImpactEffect)
+		{
+			// 파티클 스폰 크기는 약 1.5배로 지정 
+			//TODO 조정 필요
+			UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), HitImpactEffect, HitPoint, FRotator(1.5f));
+			UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), HitImpactEffect, HitPoint, FRotator::ZeroRotator, FVector(1.5f));
+		}
+		
+		if (HitCameraShakeClass)
+		{
+			// 타격 지점 중심으로 흔들림 발생
+			UGameplayStatics::PlayWorldCameraShake(GetWorld(), HitCameraShakeClass, HitPoint, 1000.0f, 2000.0f, 1.0f);
+		}
+	
+		if (HitImpactSound)
+		{
+			UGameplayStatics::SpawnSoundAtLocation(this, HitImpactSound, HitPoint);
+		}
+		
+		float FinalDamage = CurrentStat.AttackPower * DamageMultiplier;
+		//	TODO 데미지 전달로직
+		IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, FinalDamage, this, FName("Body"), HitPoint);
+		
+		if (OtherActor && bHasInterface)
+		{
+			// [로그] 최종 데미지 전달 성공
+			UE_LOG(LogTemp, Warning, TEXT("Damage Logic Executed on %s"), *OtherActor->GetName());
+		}
+		
 		HitActors.Add(OtherActor);
 	}
 	else
@@ -315,6 +425,7 @@ void AExiaCharacterBase::OnWeaponOverlap(UPrimitiveComponent* OverlappedComp, AA
 		UE_LOG(LogTemp, Error, TEXT("Target %s does not have GundamCombatInterface!"), OtherActor ? *OtherActor->GetName() : TEXT("NULL"));
 	}
 }
+
 
 void AExiaCharacterBase::OnGuardBreak()
 {
@@ -341,14 +452,6 @@ void AExiaCharacterBase::OnGuardBreak()
 	}
 	
 	UE_LOG(LogTemp, Error, TEXT("!!! GUARD BREAK !!! Stunned for %f seconds"), StunDuration);
-
-	//소모 타이머 중지
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	
-	if (CurrentGNParticles < CurrentStat.GNParticles)
-	{
-		GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
-	}
 	
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
 	if (GuardCollision) GuardCollision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -396,14 +499,14 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	if (bIsStunned)
 	{
 		CurrentHP = FMath::Clamp(CurrentHP - DamageAmount, 0.0f, MaxHP);
-		UE_LOG(LogTemp, Warning, TEXT("Stunned Hit! Damage: %f"), DamageAmount);
+		UE_LOG(LogTemp, Warning, TEXT("Stunned Hit! Damage: %f | Left HP: %f"), DamageAmount, CurrentHP);
 	}
 	// 가드(Block) 상태: 체력 대신 가드 게이지 차감
 	else if (bBlock)
 	{
 		CurrentGuardHP -= DamageAmount; // 가드는 방어력 적용 전 수치로 차감
 		UE_LOG(LogTemp, Warning, TEXT("Blocked! Guard HP: %f / %f"), CurrentGuardHP, MaxGuardHP);
-
+		
 		if (CurrentGuardHP <= 0.0f)
 		{
 			CurrentGuardHP = 0.0f;
@@ -417,7 +520,7 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	else 
 	{
 		CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
-		UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f, CurrentHP: %f"), ActualDamage, CurrentHP);
+	UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f | Left HP: %f"), ActualDamage, CurrentHP);
 	}
 
 	// 사망 판정
@@ -435,17 +538,13 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	if (HitMontage && Attacker)
 	{
 		// 슈퍼아머 상태라면 애니메이션 재생 건너뛰기 로직 추가 가능
-
-		// if (!bIsStunned && bCanPlayHitReaction)
-		// {
-		// }
+		
 		FVector ToAttacker = Attacker->GetActorLocation() - GetActorLocation();
 		ToAttacker.Normalize();
 		float ForwardDot = FVector::DotProduct(GetActorForwardVector(), ToAttacker);
 		// 정면/후면 섹션 결정 (ForwardDot > 0 이면 정면)
 		FName SectionName = (ForwardDot >= 0.5f) ? FName("Hit_Front") : FName("Hit_Back");
-			
-		PlayAnimMontage(HitMontage, 1.0f, SectionName);
+		PlayAnimMontage(HitMontage, 1.5f, SectionName);
 	}
 }
 
@@ -497,6 +596,9 @@ void AExiaCharacterBase::LoadCharacterData()
 		{
 			CurrentStat = *CharData;
 			CurrentStat.CurrentGuardHP = CurrentStat.MaxGuardHP; // LoadCharcterDate를 불러올때 현재 가드HP를 MaxGuardHP에 맞춰 풀 충전
+			MaxGuardHP = CurrentStat.MaxGuardHP;
+			
+			CurrentGuardHP = MaxGuardHP;
 			
 			auto* Movement = GetCharacterMovement();
 			if (Movement)
@@ -546,9 +648,6 @@ void AExiaCharacterBase::Landed(const FHitResult& Hit)
 	bHasJumpDashUsed = false;
 	bCanJump = false;
 	
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
-	
 	if (bIsJumpBoosting)
 	{
 		StopJumpDash();
@@ -574,86 +673,86 @@ void AExiaCharacterBase::ResetJumpLock()
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 }
 
-void AExiaCharacterBase::UpdateBoostEnergy()
-{
-	// 0보다 작아지지 않도록 예외 처리
-	if (CurrentGNParticles <= 0.0f)
-	{
-		CurrentGNParticles = 0.0f;
-		StopBoost();
-		return;
-	}
-	
-	// 0.1초당 소모량만큼 차감
-	float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.01f); 
-	CurrentGNParticles -= ConsumeAmount;
-	
-	if (CurrentGNParticles <= 0.0f)
-	{
-		CurrentGNParticles = 0.0f;
-		StopBoost();
-	}
-	
-	if (GetVelocity().Size2D() < 50.0f)
-	{
-		StopBoost();
-	}
-	
-	// 부스트 지속 시간 확인
-	float BoostTime = GetWorldTimerManager().GetTimerElapsed(BoostTimerHandle);
-	
-	// 현재 속도
-	float CurrentSpeed = GetVelocity().Size2D();
-	
-	// 부스트 중단 조건 체크
-	// 연료 소진 시 혹은 정지 시 부스트 종료
-	if (CurrentGNParticles <= 0)
-	{
-		StopBoost();
-		if (GEngine) GEngine->AddOnScreenDebugMessage(5, 2.0f, FColor::Red, TEXT("Boost OFF: No Fuel!"));
-		return;
-	}
-	
-	// 부스트 중단 조건2 멈췄을때
-	if(CurrentSpeed < 50.0f)
-	{
-		StopBoost();
-		if (GEngine) GEngine->AddOnScreenDebugMessage(6, 0.1f, FColor::Yellow, TEXT("Boost Warning: Speed Low"));
-	}
-	
-	// 디버그 로그
-	if (GEngine)
-	{
-		FString Msg = FString::Printf(TEXT("Using GN Particles: %.1f"), CurrentGNParticles);
-		// 부스트 중일 때는 '빨간색'으로 표시
-		GEngine->AddOnScreenDebugMessage(2, 0.1f, FColor::Red, Msg);
-	}
-}
-
-void AExiaCharacterBase::RecoverGNParticles()
-{
-	float RecoveryRate = CurrentStat.BoostConsumptionRate * 0.8f;
-	float RecoveryAmount = RecoveryRate * 0.2f;
-	
-	CurrentGNParticles += RecoveryAmount;
-	
-	// (디버그용)로그 출력
-	if (GEngine)
-	{
-		FString Msg = FString::Printf(TEXT("Recovering... %.1f / %.1f"), CurrentGNParticles, CurrentStat.GNParticles);
-		GEngine->AddOnScreenDebugMessage(3, 0.1f, FColor::Green, Msg);
-	}
-	
-	// 만약 GN입자가 최대치일때 예외적 처리
-	if (CurrentGNParticles >= CurrentStat.GNParticles)
-	{
-		CurrentGNParticles = CurrentStat.GNParticles;
-		GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
-        
-		if (GEngine) GEngine->AddOnScreenDebugMessage(4, 2.0f, FColor::Cyan, TEXT("GN Particles Fully Charged!"));
-	}
-	
-}
+// void AExiaCharacterBase::UpdateBoostEnergy()
+// {
+// 	// 0보다 작아지지 않도록 예외 처리
+// 	if (CurrentGNParticles <= 0.0f)
+// 	{
+// 		CurrentGNParticles = 0.0f;
+// 		StopBoost();
+// 		return;
+// 	}
+// 	
+// 	// 0.1초당 소모량만큼 차감
+// 	float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.01f); 
+// 	CurrentGNParticles -= ConsumeAmount;
+// 	
+// 	if (CurrentGNParticles <= 0.0f)
+// 	{
+// 		CurrentGNParticles = 0.0f;
+// 		StopBoost();
+// 	}
+// 	
+// 	if (GetVelocity().Size2D() < 50.0f)
+// 	{
+// 		StopBoost();
+// 	}
+// 	
+// 	// 부스트 지속 시간 확인
+// 	float BoostTime = GetWorldTimerManager().GetTimerElapsed(BoostTimerHandle);
+// 	
+// 	// 현재 속도
+// 	float CurrentSpeed = GetVelocity().Size2D();
+// 	
+// 	// 부스트 중단 조건 체크
+// 	// 연료 소진 시 혹은 정지 시 부스트 종료
+// 	if (CurrentGNParticles <= 0)
+// 	{
+// 		StopBoost();
+// 		if (GEngine) GEngine->AddOnScreenDebugMessage(5, 2.0f, FColor::Red, TEXT("Boost OFF: No Fuel!"));
+// 		return;
+// 	}
+// 	
+// 	// 부스트 중단 조건2 멈췄을때
+// 	if(CurrentSpeed < 50.0f)
+// 	{
+// 		StopBoost();
+// 		if (GEngine) GEngine->AddOnScreenDebugMessage(6, 0.1f, FColor::Yellow, TEXT("Boost Warning: Speed Low"));
+// 	}
+// 	
+// 	// 디버그 로그
+// 	if (GEngine)
+// 	{
+// 		FString Msg = FString::Printf(TEXT("[%s] GN Particles: %.1f"), *GetName(), CurrentGNParticles);
+// 		// AI는 빨강, 플레이어는 파랑 등으로 색깔 구분
+// 		FColor LogColor = IsPlayerControlled() ? FColor::Blue : FColor::Red;
+// 		GEngine->AddOnScreenDebugMessage(-1, 0.1f, LogColor, Msg);
+// 	}
+// }
+//
+// void AExiaCharacterBase::RecoverGNParticles()
+// {
+// 	float RecoveryRate = CurrentStat.BoostConsumptionRate * 0.8f;
+// 	float RecoveryAmount = RecoveryRate * 0.2f;
+// 	
+// 	CurrentGNParticles += RecoveryAmount;
+// 	
+// 	// (디버그용)로그 출력
+// 	if (GEngine)
+// 	{
+// 		FString Msg = FString::Printf(TEXT("Recovering... %.1f / %.1f"), CurrentGNParticles, CurrentStat.GNParticles);
+// 		GEngine->AddOnScreenDebugMessage(3, 0.1f, FColor::Green, Msg);
+// 	}
+// 	
+// 	// 만약 GN입자가 최대치일때 예외적 처리
+// 	if (CurrentGNParticles >= CurrentStat.GNParticles)
+// 	{
+// 		CurrentGNParticles = CurrentStat.GNParticles;
+// 		GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
+//         
+// 		if (GEngine) GEngine->AddOnScreenDebugMessage(4, 2.0f, FColor::Cyan, TEXT("GN Particles Fully Charged!"));
+// 	}
+// }
 
 void AExiaCharacterBase::SetWeaponCollisionEnabled(bool bEnabled)
 {
@@ -773,7 +872,14 @@ void AExiaCharacterBase::StopFlying()
 // 체력 퍼센트 반환
 float AExiaCharacterBase::GetHPPercent_Implementation() const
 {
-	return (MaxHP > 0.0f) ? (CurrentHP / MaxHP) : 0.0f;
+	if (MaxHP <= 0.0f)
+	{
+		return 0.0f;
+	}
+	
+	float Percent = CurrentHP / MaxHP;
+	
+	return FMath::Clamp(Percent, 0.0f, 1.0f);
 }
 
 // 부스트(GN입자) 퍼센트 반환
@@ -781,29 +887,27 @@ float AExiaCharacterBase::GetGNParticlePercent_Implementation() const
 {
 	// CurrentStat.GNParticles가 최대치, CurrentGNParticles가 현재치입니다
 	return (CurrentStat.GNParticles > 0.0f) ? (CurrentGNParticles / CurrentStat.GNParticles) : 0.0f;
+	
 }
 
-// 가드 게이지 퍼센트 반환
 float AExiaCharacterBase::GetGuardPercent_Implementation() const
 {
-	// 구조체 내의 CurrentGuardHP와 MaxGuardHP를 사용합니다
-	return (CurrentStat.MaxGuardHP > 0.0f) ? (CurrentStat.CurrentGuardHP / CurrentStat.MaxGuardHP) : 0.0f;
+	// 0으로 나누기 방지 (Max가 0이면 0% 리턴)
+	if (MaxGuardHP <= 0.0f)
+	{
+		return 0.0f;
+	}
+	
+	float Percent = CurrentGuardHP / MaxGuardHP;
+
+	// 혹시 모를 오차를 위해 0~1 사이로 자르기
+	return FMath::Clamp(Percent, 0.0f, 1.0f);
 }
 
 // Called every frame
 void AExiaCharacterBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	
-	// 가드 중이 아니고, 경직 상태가 아니며, 가드 체력이 깍여 있다면 회복모드
-	if (!bBlock && !bIsStunned && CurrentGuardHP < MaxGuardHP)
-	{
-		CurrentGuardHP = FMath::Min(CurrentGuardHP + (GuardRecoveryRate * DeltaTime), MaxGuardHP);
-	}
-	
-	// // 이동 입력이 있고 + 부스트 키가 눌려있을 때만 bIsBoosting을 참으로 유지
-	// bool bHasInput = GetLastMovementInputVector().Size() > 0.0f;
-	// bIsBoosting = bIsBoostKeyDown && bHasInput; 
 	
 	if (bIsJumpBoosting)
 	{
@@ -816,20 +920,31 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 		}
 	}
 	
-	// 연료 기능 구현하면서 중간 조건이 같이 추가되었으며 더이상 Tick에서 처리 하지 않음.
-	// if (bIsBoosting)
-	// {
-	// 	// 1. 현재 속도 확인 (2D 평면 기준)
-	// 	float CurrentSpeed = GetVelocity().Size2D();
-	// 	
-	// 	if (CurrentSpeed < 100.0f)
-	// 	{
-	// 		// 3. 입력이 아예 없거나 벽에 가로막힌 경우 대시 종료
-	// 		StopBoost();
-	// 		
-	// 		// UE_LOG(LogTemp, Warning, TEXT("Dash Auto Stopped - Velocity too low"));
-	// 	}
-	// }
+	if (bBlock)
+	{
+		// 예: 가드 시에는 부스트 소모량의 80%만 소모
+		float ConsumeAmount = (CurrentStat.BoostConsumptionRate * 0.8f) * DeltaTime;
+		ConsumeGNParticles(ConsumeAmount);
+	}
+	// 부스트(대시/점프부스트) 중일 때 에너지 소모
+	else if (bIsBoosting || bIsJumpBoosting)
+	{
+		// 예: 1초당 BoostConsumptionRate 만큼 소모
+		float ConsumeAmount = CurrentStat.BoostConsumptionRate * DeltaTime;
+		ConsumeGNParticles(ConsumeAmount);
+	}
+	// 아무것도 안 하고 있을 때 회복 (공중이 아닐 때만 회복 등의 조건 추가 가능)
+	else if (!bBlock && !bIsStunned && !bIsAttacking)
+	{
+		RecoverGNParticles(DeltaTime);
+	}
+
+	// 가드 체력(실드 내구도) 회복 로직
+	if (!bBlock && !bIsStunned && CurrentGuardHP < MaxGuardHP)
+	{
+		float RecoveryAmount = CurrentStat.GuardRecoveryRate * DeltaTime;
+		CurrentStat.CurrentGuardHP = FMath::Min(CurrentGuardHP + (GuardRecoveryRate * DeltaTime), MaxGuardHP);
+	}
 	
 	if (GetCharacterMovement()->IsFalling() && bIsBoosting)
 	{
@@ -903,12 +1018,6 @@ void AExiaCharacterBase::StartJumpBoost()
 	// 짧게 누를때 대응
 	Jump(); 
 	bIsJumpBoosting = true;
-	
-	//회복 타이머가 돌고 있는 상태라면 중지 시키기.
-	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
-	
-	//gn입자 소모
-	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
 }
 
 void AExiaCharacterBase::JumpBoosting()
@@ -933,10 +1042,6 @@ void AExiaCharacterBase::StopJumpBoost()
 	//키를 떼면 점프 중단 및 부스트 상태 해제
 	StopJumping();
 	bIsJumpBoosting = false;
-	
-	//소모 타이머 중지
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	
 }
 
 void AExiaCharacterBase::Jump()
@@ -976,13 +1081,6 @@ void AExiaCharacterBase::StartJumpDash()
 		
 		GetCharacterMovement()->GravityScale = DefaultGravityScale - 2.5f;
 		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
-		
-		//회복 타이머가 돌고 있는 상태라면 중지 시키기.
-		GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
-
-		//gn입자 소모
-		GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
-		
 	}
 }
 
@@ -992,10 +1090,6 @@ void AExiaCharacterBase::StopJumpDash()
 	bIsJumping = false;
 	
 	GetCharacterMovement()->GravityScale = DefaultGravityScale;
-	
-	//소모 타이머 중지
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 }
 
 void AExiaCharacterBase::StartBoost()
@@ -1005,16 +1099,10 @@ void AExiaCharacterBase::StartBoost()
 	// 아무 키도 눌리지 않았다면 부스트를 실행하지 않음.
 	FVector InputDir = GetLastMovementInputVector();
 	if (InputDir.IsNearlyZero()) return;
-	
-	// 회복 타이머가 돌고 있었다면 중지시킨다. ( 동시 실행 방지 )
-	GetWorldTimerManager().ClearTimer(RecoveryTimerHandle);
-	
+
 	// 부스팅 상태 전환
 	bIsBoosting = true;
-	
-	// 소모 타이머 시작 0.1초마다 UpdateBoostEnegy 함수를 반복 실행
-	GetWorldTimerManager().SetTimer(BoostTimerHandle, this, &AExiaCharacterBase::UpdateBoostEnergy, 0.1f, true);
-	
+
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	
@@ -1050,27 +1138,38 @@ void AExiaCharacterBase::StopBoost()
 	if (!bIsBoosting) return;
 	
 	bIsBoosting = false;
-		
-	// 소모 타이머 중지
-	GetWorldTimerManager().ClearTimer(BoostTimerHandle);
-	GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
 	
 	//속도 원복
 	bUseControllerRotationYaw = false;
 	GetCharacterMovement()->RotationRate = FRotator(0,180.0f,0);
 	GetCharacterMovement()->bOrientRotationToMovement = true; 
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed;
+}
 
-	if (CurrentGNParticles < CurrentStat.GNParticles)
+void AExiaCharacterBase::ConsumeGNParticles(float Amount)
+{
+	CurrentGNParticles = FMath::Clamp(CurrentGNParticles - Amount, 0.0f, CurrentStat.GNParticles);
+	// 에너지가 바닥나면 강제 종료
+	if (CurrentGNParticles <= 0.0f)
 	{
-		GetWorldTimerManager().SetTimer(RecoveryTimerHandle, this, &AExiaCharacterBase::RecoverGNParticles, 0.1f, true);
+		if (bBlock) StopGuard();      // 가드 풀기
+		if (bIsBoosting) StopBoost(); // 부스트 풀기
+		if (bIsJumpBoosting) StopJumpBoost();
+		if (bIsJumping) StopJumpDash();
+        
+		// 연료 부족 사운드나 UI 메시지 출력
+		// if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("GN Particles Depleted!"));
 	}
 }
 
-void AExiaCharacterBase::ConsumeGNParticles(float DeltaTime)
+void AExiaCharacterBase::RecoverGNParticles(float DeltaTime)
 {
-	//d 추후 데이터 테이블의 CurrentGNParticles의 값을 깍는 로직이 들어갈 자리
-	//if (CurrentStat.MaxGNParticles <= 0) StopBoost();
+	if (CurrentGNParticles >= CurrentStat.GNParticles) return;
+
+	// 회복 속도 계산 (부스트 소모량의 50% 속도로 회복 등 밸런스 조절)
+	float RecoverySpeed = CurrentStat.BoostConsumptionRate * 0.5f; 
+    
+	CurrentGNParticles = FMath::Clamp(CurrentGNParticles + (RecoverySpeed * DeltaTime), 0.0f, CurrentStat.GNParticles);
 }
 
 // void AExiaCharacterBase::Move(const FInputActionValue& Value)

@@ -50,7 +50,6 @@ public:
 	UAISenseConfig_Sight* SightConfig;
 
 	// --- [데이터 에셋 키 이름] ---
-	// 블랙보드에서 쓸 변수 이름들을 미리 정의
 	static const FName Key_TargetActor; // 타겟
 	static const FName Key_HasLineOfSight; // 시야 확보 여부
 };

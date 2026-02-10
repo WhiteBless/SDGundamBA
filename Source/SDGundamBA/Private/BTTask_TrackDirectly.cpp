@@ -59,6 +59,17 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 
 	bool bTargetInAir = OwnerComp.GetBlackboardComponent()->GetValueAsBool(FName("bIsTargetInAir"));
 	
+	if (DirToTarget.Z > 200.0f) 
+	{
+		if (MoveComp->MovementMode != MOVE_Flying)
+		{
+			MoveComp->SetMovementMode(MOVE_Flying);
+        
+			// 바닥에서 강제로 떼어내기 (위로 150만큼 상승)
+			AIChar->LaunchCharacter(FVector(0, 0, 150.0f), false, true);
+		}
+	}
+	
 	if (bTargetInAir)
 	{
 		if (MoveComp->MovementMode == MOVE_Flying)
@@ -70,29 +81,48 @@ void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* N
 		FVector Dir = TargetLoc - MyLoc;
 		AIChar->AddMovementInput(Dir.GetSafeNormal(), 1.0f);
 	}
-
-	else
+	else if (FMath::Abs(DirToTarget.Z) < 100.0f && MoveComp->MovementMode == MOVE_Flying)
 	{
-		if (MoveComp->MovementMode == MOVE_Flying && !MoveComp->IsFalling())
+		FHitResult Hit;
+		FVector Start = AIChar->GetActorLocation();
+		FVector End = Start - FVector(0, 0, 200.0f); // 발 밑 200cm 확인
+		FCollisionQueryParams Params;
+		Params.AddIgnoredActor(AIChar);
+
+		// 발 밑에 땅이 있는지 체크
+		bool bGroundFound = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
+
+		if (bGroundFound)
 		{
 			MoveComp->SetMovementMode(MOVE_Walking);
 		}
-		// 지상일 때는 네비게이션 시스템에 "길"을 물어봅니다.
-		UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
-		UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(GetWorld(), MyLoc, TargetLoc);
-
-		// 갈 수 있는 길(PathPoints)이 있고 장애물이 있다면
-		if (NavPath && NavPath->PathPoints.Num() > 1)
-		{
-			// 바로 다음 길목(Index 1)을 향해 방향 벡터를 설정합니다.
-			DirToTarget = NavPath->PathPoints[1] - MyLoc;
-		}
 		else
 		{
-			// 길이 없으면 직선으로 시도
-			DirToTarget = TargetLoc - MyLoc;
+			// 땅이 없으면 비행 유지
 		}
 	}
+	// else
+	// {
+	// 	if (MoveComp->MovementMode == MOVE_Flying && !MoveComp->IsFalling())
+	// 	{
+	// 		MoveComp->SetMovementMode(MOVE_Walking);
+	// 	}
+	// 	// 지상일 때는 네비게이션 시스템에 "길"을 물어봅니다.
+	// 	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+	// 	UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(GetWorld(), MyLoc, TargetLoc);
+	//
+	// 	// 갈 수 있는 길(PathPoints)이 있고 장애물이 있다면
+	// 	if (NavPath && NavPath->PathPoints.Num() > 1)
+	// 	{
+	// 		// 바로 다음 길목(Index 1)을 향해 방향 벡터를 설정합니다.
+	// 		DirToTarget = NavPath->PathPoints[1] - MyLoc;
+	// 	}
+	// 	else
+	// 	{
+	// 		// 길이 없으면 직선으로 시도
+	// 		DirToTarget = TargetLoc - MyLoc;
+	// 	}
+	// }
 	
 	FVector FinalDir = DirToTarget.GetSafeNormal(); 
 	AIChar->AddMovementInput(FinalDir, 1.0f);

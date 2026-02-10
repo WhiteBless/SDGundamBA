@@ -81,6 +81,10 @@ public:
 
 	void OpenInputBuffer();
 	void CloseInputBuffer();
+	
+	//TODO 카메라 쉐이크
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera | FX")
+	TSubclassOf<class UCameraShakeBase> HitCameraShakeClass;
 
 	//TODO 변수의 값을 외부 서버스 또는 태스크에서 읽어올 수 있도록 함수선언
 	FORCEINLINE bool GetIsAttacking() const { return bIsAttacking; }
@@ -113,7 +117,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
 	void StopGuard();
 	
+protected:
 	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	// 발사할 투사체 클래스 (블루프린트에서 BP_ExiaProjectile 할당)
+	UPROPERTY(EditAnywhere, Category = "Gundam | Combat")
+	TSubclassOf<class AExiaProjectile> RangedProjectileClass;
+	
+	UPROPERTY(EditAnywhere, Category = "Gundam | Combat")
+	FName MuzzleSocketName = FName("FirePosition");
+	
+public:
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
+	void FireRangedWeapon(AActor* Target = nullptr);
 	
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
@@ -157,13 +172,14 @@ protected:
 	// 히트된 적들을 기억하는 배열 (중복 타격 방지용)
 	UPROPERTY()
 	TArray<AActor*> HitActors;
-	
-	// 컴포넌트 부착
-	// UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	// class USpringArmComponent* SpringArmComp;
-	//
-	// UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	// class UCameraComponent* CameraComp;
+
+	// 공격 적중 시 재생할 파티클 이펙트
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | FX")
+	UParticleSystem* HitImpactEffect;
+
+	// 타격 사운드 - 나중에 적용
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | FX")
+	USoundBase* HitImpactSound;
 	
 	// 모션 와핑
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Motion Warping")
@@ -200,17 +216,20 @@ protected:
 	float VerticalBoostForce = 500.0f; // 점프 파워
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat")
-	float JumpBoostForce = 200000.0f; // 상승 추력
+	float JumpBoostForce = 20000.0f; // 상승 추력
 	
 	//GN입자
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stat")
 	float CurrentGNParticles;
 	
-	FTimerHandle BoostTimerHandle;
-	void UpdateBoostEnergy(); // 연료 차감 전용 함수
-
-	FTimerHandle RecoveryTimerHandle;
-	void RecoverGNParticles(); // 연료 회복 전용 함수
+	void ConsumeGNParticles(float Amount); 
+	void RecoverGNParticles(float DeltaTime);
+	
+	// FTimerHandle BoostTimerHandle;
+	// void UpdateBoostEnergy(); // 연료 차감 전용 함수
+	//
+	// FTimerHandle RecoveryTimerHandle;
+	// void RecoverGNParticles(); // 연료 회복 전용 함수
 public:
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	FORCEINLINE bool IsBoosting() const { return bIsBoosting; }
@@ -274,9 +293,6 @@ protected:
 	void Boosting();	// 누르는 도중
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void StopBoost();	// 떼는 그 시점
-	
-	//GN 입자(스테미나) 소모 로직 (추후 상세 구현 예정)
-	void ConsumeGNParticles(float DeltaTime);
 	
 	// void Move(const FInputActionValue& Value);
 	// void Look(const FInputActionValue& Value);
