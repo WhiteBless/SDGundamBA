@@ -12,7 +12,6 @@ AExiaProjectile::AExiaProjectile()
     
     CollisionComp->InitSphereRadius(15.0f);
     CollisionComp->SetCollisionProfileName(TEXT("Projectile"));
-    CollisionComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     
     RootComponent = CollisionComp;
 
@@ -44,15 +43,13 @@ void AExiaProjectile::BeginPlay()
 {
     Super::BeginPlay();
     
-    GetWorldTimerManager().SetTimer(CollisionTimerHandle, this, &AExiaProjectile::EnableCollision, 0.1f, false);
-    
     AActor* MyOwner = GetOwner();
-    
     if (!MyOwner) MyOwner = GetInstigator();
     
     if (MyOwner && CollisionComp)
     {
         CollisionComp->IgnoreActorWhenMoving(MyOwner, true);
+
         if (UPrimitiveComponent* OwnerRoot = Cast<UPrimitiveComponent>(MyOwner->GetRootComponent()))
         {
             OwnerRoot->IgnoreActorWhenMoving(this, true);
@@ -73,29 +70,35 @@ void AExiaProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
 {
     // 유효성 검사
     if (!OtherActor || !OtherComp) return;
-
-    // [디버깅] 충돌 로그 출력 (누구랑 부딪혔나?)
-    FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("NULL");
-    UE_LOG(LogTemp, Warning, TEXT("[Projectile Debug] Hit Actor: %s | Hit Comp: %s | My Owner: %s"), 
-        *OtherActor->GetName(), *OtherComp->GetName(), *OwnerName);
     
     if (OtherActor == this || OtherActor == GetOwner() || OtherActor == GetInstigator()) 
     {
-        UE_LOG(LogTemp, Log, TEXT(">> Ignored collision with Owner/Self."));
         return; 
     }
+    
+    // [디버깅] 충돌 로그 출력
+    // FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("NULL");
+    // UE_LOG(LogTemp, Warning, TEXT("[Projectile Debug] Hit Actor: %s | Hit Comp: %s | My Owner: %s"), 
+    //     *OtherActor->GetName(), *OtherComp->GetName(), *OwnerName);
     
     AActor* SafeShooter = ShooterActor ? ShooterActor : GetOwner();
     
     // 최종 검증
     if ((OtherActor != nullptr) && (OtherActor != this) && (OtherActor != SafeShooter))
     {
-        UE_LOG(LogTemp, Error, TEXT(">> EXPLOSION! Damage Logic Executed on %s"), *OtherActor->GetName());
-
+        // [로그] 어떤 뼈에 맞았는지 확인 가능
+        // UE_LOG(LogTemp, Log, TEXT("Hit Bone: %s"), *Hit.BoneName.ToString());
+        
         // 데미지 인터페이스 호출
         if (OtherActor->GetClass()->ImplementsInterface(UGundamCombatInterface::StaticClass()))
         {
-            IGundamCombatInterface::Execute_ApplyGundamDamage(OtherActor, DamageAmount, SafeShooter, FName("None"), Hit.ImpactPoint);
+            IGundamCombatInterface::Execute_ApplyGundamDamage(
+                OtherActor, 
+                DamageAmount, 
+                SafeShooter, 
+                Hit.BoneName,
+                Hit.ImpactPoint
+            );
         }
 
         // 타격 이펙트
@@ -104,11 +107,7 @@ void AExiaProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UP
             UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), HitExplosionEffect, Hit.ImpactPoint, Hit.ImpactNormal.Rotation());
         }
 
+        //TODO 투사체 디스트로이 잠시 비활성화
         Destroy();
     }
-}
-
-void AExiaProjectile::EnableCollision()
-{
-    CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 }

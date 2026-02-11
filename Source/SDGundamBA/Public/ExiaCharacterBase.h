@@ -126,9 +126,39 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Gundam | Combat")
 	FName MuzzleSocketName = FName("FirePosition");
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | FX")
+	UAnimMontage* DeathMontage;
+	
+	UPROPERTY(EditAnywhere, Category = "Gundam | FX")
+	FName DeathLoopSectionName = FName("Death");
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | FX")
+	UParticleSystem* DeathExplosionEffect;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gundam | FX")
+	USoundBase* DeathExplosionSound;
+	
+	FTimerHandle DeathTimerHandle;
+	
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Dead")
+	void PlayDeathExplosion();
+	
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Dead")
+	void OnDeath();
+	
+	UFUNCTION(BlueprintCallable, Category = "Gundam | Dead")
+	void DeathMontagePlay();
+	
 public:
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
 	void FireRangedWeapon(AActor* Target = nullptr);
+
+	UPROPERTY(EditDefaultsOnly, Category = "UI")
+	TSubclassOf<class UUserWidget> DamageTextWidgetClass;
+
+	// 데미지 텍스트 띄우는 함수
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI")
+	void ShowDamageText(float Damage, FVector Location);
 	
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stat | Guard")
@@ -239,6 +269,9 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	FORCEINLINE bool IsJumping() const { return bIsJumping; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Movement")
+	FORCEINLINE bool IsDeath() const { return bIsDeath; }
 	//상태 변수
 	bool bIsJumping;
 	
@@ -254,7 +287,7 @@ public:
 						 bool bFromSweep, const FHitResult& SweepResult);
 	
 protected:
-	// 가드 몽타주 (여기에 '가드 루프'와 '가드 브레이크'가 같이 들어있는 몽타주를 넣으세요)
+	// 가드 몽타주
 	UPROPERTY(EditAnywhere, Category = "Animation | Combat")
 	UAnimMontage* GuardMontage;
 
@@ -336,6 +369,11 @@ protected:
 	// 가드 상태 정의
 	UPROPERTY(BlueprintReadWrite, Category = "States")
 	bool bBlock;
+	
+	// 사망 판정
+	UPROPERTY(BlueprintReadWrite, Category = "States")
+	bool bIsDeath = false;
+	
 	
 	// 가드 콜리전에 무언가 부딪혔을 때 실행될 함수
 	UFUNCTION()

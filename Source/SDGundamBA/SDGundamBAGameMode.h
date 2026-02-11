@@ -18,6 +18,18 @@ public:
 	
 	/** Constructor */
 	ASDGundamBAGameMode();
+	
+	UPROPERTY(EditDefaultsOnly, Category= "UI")
+	TSubclassOf<class UUserWidget> VictoryWidgetClass;
+	
+	UPROPERTY(EditDefaultsOnly, Category= "UI")
+	TSubclassOf<class UUserWidget> DefeatWidgetClass;
+	
+	UFUNCTION(BlueprintCallable, Category= "GameRule")
+	void EndMission(bool bIsVictory);
+	
+	UFUNCTION(BlueprintCallable, Category= "GameRule")
+	void GameStop();
 };
 
 

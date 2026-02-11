@@ -6,7 +6,9 @@
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 
 AExiaPlayerCharacter::AExiaPlayerCharacter()
 {
@@ -15,6 +17,7 @@ AExiaPlayerCharacter::AExiaPlayerCharacter()
 	SpringArmComp->SetupAttachment(RootComponent);
 	SpringArmComp->TargetArmLength = 500.0f;
 	SpringArmComp->bUsePawnControlRotation = true;
+	SpringArmComp->SocketOffset = FVector(0.0f, 50.0f, 150.0f);
 
 	CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	CameraComp->SetupAttachment(SpringArmComp, USpringArmComponent::SocketName);
@@ -70,6 +73,10 @@ void AExiaPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		if (FireAction)
 		{
 			EnhancedInputComponent->BindAction(FireAction, ETriggerEvent::Started, this, &AExiaPlayerCharacter::Input_Fire);
+		}
+		if (LockOnAction)
+		{
+			EnhancedInputComponent->BindAction(LockOnAction, ETriggerEvent::Started, this, &AExiaPlayerCharacter::Input_ToggleLockOn);
 		}
 	}
 }
@@ -191,9 +198,123 @@ void AExiaPlayerCharacter::Input_StopBoost()
 	StopBoost();
 }
 
+void AExiaPlayerCharacter::Input_ToggleLockOn()
+{
+	if (LockOnTarget)
+	{
+		LockOnTarget = nullptr;
+		bUseControllerRotationPitch = false;
+		GetCharacterMovement()->bOrientRotationToMovement = true;
+		UE_LOG(LogTemp, Log, TEXT("LockOn Released"));
+		return;
+	}
+	
+	FindLockOnTarget();
+}
+
+void AExiaPlayerCharacter::FindLockOnTarget()
+{
+	FVector CameraLoc = CameraComp->GetComponentLocation();
+	FVector CameraFwd = CameraComp->GetForwardVector();
+	
+	DrawDebugSphere(GetWorld(), GetActorLocation(), LockOnDistance, 32, FColor::Green, false, 2.0f);
+	
+	TArray<FOverlapResult> OverlapResults;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+	
+	bool bHit = GetWorld()->OverlapMultiByObjectType(
+			OverlapResults,
+			GetActorLocation(),
+			FQuat::Identity,
+			FCollisionObjectQueryParams(ECollisionChannel::ECC_GameTraceChannel5),
+			FCollisionShape::MakeSphere(LockOnDistance),
+			Params
+		);
+	
+	UE_LOG(LogTemp, Warning, TEXT("Overlap Found: %d actors"), OverlapResults.Num());
+	
+	AActor* ClosestTarget = nullptr;
+	float MaxDotProduct = -1.0f;
+	
+	for (const FOverlapResult& Result : OverlapResults)
+	{
+		AActor* Candidate = Result.GetActor();
+		if (!Candidate || !Candidate->ActorHasTag("Enemy")) continue;
+
+		FString TagStatus = Candidate->ActorHasTag("Enemy") ? TEXT("YES") : TEXT("NO");
+		UE_LOG(LogTemp, Log, TEXT("Candidate: %s | Has 'Enemy' Tag? : %s"), *Candidate->GetName(), *TagStatus);
+		
+		// 나와 적 사이의 방향 벡터
+		FVector DirToTarget = (Candidate->GetActorLocation() - CameraLoc).GetSafeNormal();
+		float Dot = FVector::DotProduct(CameraFwd, DirToTarget);
+
+		// 시야각 안에 있고(예: 0.5 이상), 이전 후보보다 더 중앙에 있다면 교체
+		if (Dot > 0.5f && Dot > MaxDotProduct)
+		{
+			// (옵션) 장애물 검사 (LineTrace) 추가 가능: 벽 뒤에 있는 적은 제외
+			FHitResult Hit;
+			bool bBlocked = GetWorld()->LineTraceSingleByChannel(
+				Hit, CameraLoc, Candidate->GetActorLocation(), ECC_Visibility, Params
+			);
+            
+			if (!bBlocked || Hit.GetActor() == Candidate)
+			{
+				MaxDotProduct = Dot;
+				ClosestTarget = Candidate;
+			}
+		}
+	}
+	
+	if (ClosestTarget)
+	{
+		LockOnTarget = ClosestTarget;
+		UE_LOG(LogTemp, Warning, TEXT("LockOn Target Found: %s"), *LockOnTarget->GetName());
+        
+		// 락온 시 적을 바라보게 할 것인가?
+		bUseControllerRotationYaw = true; 
+		GetCharacterMovement()->bOrientRotationToMovement = false;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("No Target Found"));
+	}
+}
+
 void AExiaPlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	
+	if (LockOnTarget)
+	{
+		// 타겟이 죽거나(Destroyed) 너무 멀어지면 락온 해제
+		float Dist = FVector::Dist(GetActorLocation(), LockOnTarget->GetActorLocation());
+		if (LockOnTarget->IsActorBeingDestroyed() || Dist > LockOnDistance * 1.2f)
+		{
+			Input_ToggleLockOn();
+			return;
+		}
+		
+		FVector TargetLoc = LockOnTarget->GetActorLocation(); // 기본값
+        
+		// 적이 캐릭터라면 메시의 소켓을 조준
+		ACharacter* EnemyChar = Cast<ACharacter>(LockOnTarget);
+		if (EnemyChar)
+		{
+			// "Spine_02", "Chest", "spine_03" 등 적절한 뼈 이름 사용
+			if (EnemyChar->GetMesh()->DoesSocketExist(FName("Core")))
+			{
+				TargetLoc = EnemyChar->GetMesh()->GetSocketLocation(FName("Core"));
+			}
+		}
+		FVector CameraLoc = CameraComp->GetComponentLocation();
+		FRotator TargetRot = UKismetMathLibrary::FindLookAtRotation(CameraLoc, TargetLoc);
+		
+		FRotator CurrentRot = GetControlRotation();
+		FRotator SmoothRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, 5.0f); // 속도 10
+
+		// 적용
+		GetController()->SetControlRotation(SmoothRot);
+	}
 }
 

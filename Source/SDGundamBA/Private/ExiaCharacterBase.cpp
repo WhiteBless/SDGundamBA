@@ -19,6 +19,7 @@
 #include "Components/BoxComponent.h"
 #include "Engine/DataTable.h"
 #include "SDGundamBA.h"
+#include "SDGundamBAGameMode.h"
 #include "AI/Public/GundamAIController.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
@@ -69,6 +70,8 @@ void AExiaCharacterBase::BeginPlay()
 {
 	Super::BeginPlay();
 	LoadCharacterData();
+	
+	bIsDeath = false;
 	
 	//가드 콜리전
 	if (GuardCollision)
@@ -240,7 +243,7 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
         SetWarpTarget(nullptr);
     }
 
-    // 4. 공격 실행 및 선입력(Combo Buffer) 처리
+    // 공격 실행 및 선입력(Combo Buffer) 처리
     if (AnimInstance->Montage_IsPlaying(AttackMontage))
     {
         // 공격 중이라면 다음 공격 예약
@@ -252,7 +255,7 @@ void AExiaCharacterBase::ExecuteAttack_Implementation()
         return; 
     }
 
-    // 5. 실제 첫 공격 시작
+    // 실제 첫 공격 시작
     bIsAttacking = true; 
     bHasBufferedInput = false;
     AttackComboCount = 0;
@@ -268,6 +271,80 @@ void AExiaCharacterBase::OnAttackMontageEnded(UAnimMontage* Montage, bool bInter
 		bIsAttacking = false;
 		AttackComboCount = 0;
 		UE_LOG(LogTemp, Log, TEXT("Attack State Cleared."));
+	}
+}
+
+void AExiaCharacterBase::PlayDeathExplosion()
+{
+	if (DeathExplosionEffect)
+	{
+		FVector FeetLoc = GetActorLocation();
+		UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), DeathExplosionEffect, FeetLoc, FRotator::ZeroRotator, FVector(2.2f));// 크기 2배
+	}
+	
+	if (DeathExplosionSound)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, DeathExplosionSound, GetActorLocation());
+	}
+	
+	GetMesh()->SetHiddenInGame(true);
+	
+	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
+	
+	//게임 모드에 전달
+	ASDGundamBAGameMode* GM = Cast<ASDGundamBAGameMode>(GetWorld()->GetAuthGameMode());
+	if (GM)
+	{
+		if (IsPlayerControlled())
+		{
+			// 플레이어 사망 -> 패배 UI 출력
+			GM->EndMission(false); 
+		}
+		else if (ActorHasTag("Enemy"))
+		{
+			// 보스 사망 -> 승리 UI 출력
+			GM->EndMission(true);
+		}
+	}
+	
+	SetLifeSpan(0.1f);
+}
+
+void AExiaCharacterBase::OnDeath()
+{
+
+	GetCharacterMovement()->DisableMovement();
+	if (GetController()) GetController()->StopMovement();
+	
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	
+	bIsAttacking = false;
+	bBlock = false;
+	bIsJumping = false;
+	bIsBoosting = false;
+	bIsDeath = true;
+	
+	if (DeathMontage)
+	{
+		DeathMontagePlay();
+		
+		// 폭발 이펙트 타이머
+		GetWorldTimerManager().SetTimer(DeathTimerHandle, this, &AExiaCharacterBase::PlayDeathExplosion, 3.0f, false);
+	}
+}
+
+void AExiaCharacterBase::DeathMontagePlay()
+{
+	if (bIsDeath)
+	{
+		PlayAnimMontage(DeathMontage, 1.0f, DeathLoopSectionName);
+		
+		// UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		// if (AnimInstance)
+		// {
+		// 	
+		// 	AnimInstance->Montage_JumpToSection(DeathLoopSectionName, DeathMontage);
+		// }
 	}
 }
 
@@ -489,10 +566,12 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	UE_LOG(LogTemp, Error, TEXT("DAMAGE RECEIVED! Amount: %f"), DamageAmount);
 	
 	if (CurrentHP <= 0.0f) return;
-
+	
 	// 방어력을 적용한 실제 데미지 계산
-	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);
-
+	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);	
+	
+	ShowDamageText(ActualDamage, HitLocation);
+	
 	// 피격 상태 판별 (스턴 > 가드 > 일반 피격 순서)
     
 	// 경직(Stun) 상태: 가드 불가, 100% 데미지
@@ -528,7 +607,8 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 	{
 		CurrentHP = 0.0f;
 		UE_LOG(LogTemp, Error, TEXT("%s Destroyed!"), *GetName());
-		// OnDeath(); // 사망 로직 호출
+		OnDeath();
+		
 		return;
 	}
 	

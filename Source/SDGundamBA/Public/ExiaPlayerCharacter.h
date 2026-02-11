@@ -65,6 +65,9 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	UInputAction* StopBoostAction;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* LockOnAction;
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
@@ -81,7 +84,27 @@ protected:
 	void Input_StartBoost();
 	void Input_StopBoost();
 	
+	// 현재 락온된 타겟
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "LockOn")
+	AActor* LockOnTarget;
+
+	// 락온 탐색 범위 (거리)
+	UPROPERTY(EditAnywhere, Category = "LockOn")
+	float LockOnDistance = 3000.0f;
+
+	// 락온 쿨타임 (버튼 연타 방지)
+	bool bCanLockOn = true;
+
+	// 락온 실행/해제 함수 (Input 바인딩용)
+	void Input_ToggleLockOn();
+
+	// 최적의 타겟을 찾는 함수
+	void FindLockOnTarget();
+	
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+	
+	UFUNCTION(BlueprintCallable, Category = "LockOn")
+	AActor* GetLockOnTarget() const { return LockOnTarget; }
 };

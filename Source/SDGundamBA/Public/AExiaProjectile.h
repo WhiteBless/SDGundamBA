@@ -50,11 +50,4 @@ public:
 	// 충돌 시 호출될 함수
 	UFUNCTION()
 	void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
-		
-	// 충돌 활성화 타이머
-	FTimerHandle CollisionTimerHandle;
-
-	// 타이머가 끝나면 호출될 함수
-	void EnableCollision();
-	
 };
