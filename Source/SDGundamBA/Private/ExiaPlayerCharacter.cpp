@@ -81,6 +81,12 @@ void AExiaPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	}
 }
 
+void AExiaPlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	UE_LOG(LogTemp,Warning,TEXT("Player PossessedBy"));
+}
+
 // --- 입력 처리 함수들 ---
 
 void AExiaPlayerCharacter::Move(const FInputActionValue& Value)
@@ -136,8 +142,6 @@ void AExiaPlayerCharacter::Input_StartJump()
 	Jump();
 	if (bIsFlying)
 	{
-		// 원하시면 여기에 상승 로직을 넣을 수 있습니다.
-		// AddMovementInput(GetActorUpVector(), 1.0f); 
 		return;
 	}
 	

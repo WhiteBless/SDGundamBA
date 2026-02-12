@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "BTTask_TrackDirectly.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
@@ -9,169 +6,99 @@
 #include "GundamDataStructs.h"
 #include "ExiaAICharacter.h"
 #include "DrawDebugHelpers.h"
-#include "NavigationPath.h"
-#include "NavigationSystem.h"
 
 UBTTask_TrackDirectly::UBTTask_TrackDirectly()
 {
-	bNotifyTick = true;
-	NodeName = "Track Directly (Input)";
+    bNotifyTick = true;
+    NodeName = "Track Directly";
 }
 
 EBTNodeResult::Type UBTTask_TrackDirectly::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-	AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!AIController) return EBTNodeResult::Failed;
-
-	ACharacter* AIChar = Cast<ACharacter>(AIController->GetPawn());
-	if (!AIChar) return EBTNodeResult::Failed;
-	
-	return EBTNodeResult::InProgress;
+    return EBTNodeResult::InProgress;
 }
 
 void UBTTask_TrackDirectly::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
-	Super::TickTask(OwnerComp, NodeMemory, DeltaSeconds);
-	
-	AAIController* AIController = OwnerComp.GetAIOwner();
-	AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(AIController->GetPawn());
+    Super::TickTask(OwnerComp, NodeMemory, DeltaSeconds);
+
+    AAIController* AIC = OwnerComp.GetAIOwner();
+    AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(AIC->GetPawn());
     
-	// 블랙보드에서 타겟(TargetActor) 가져오기
-	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
-	AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(GetSelectedBlackboardKey()));
+    // 타겟 가져오기
+    UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
+    AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(GetSelectedBlackboardKey()));
 
-	UE_LOG(LogTemp, Warning, TEXT("태스크 실행 중... 타겟: %s"), 
-	TargetActor ? *TargetActor->GetName() : TEXT("없음(NULL)"));
-	
-	// 타겟이 존재하지 않거나 죽었으면 실패 처리
-	if (!AIChar || !TargetActor)
-	{
-		FinishLatentTask(OwnerComp,EBTNodeResult::Failed);
-		return;
-	}
-	
-	// 벡터 계산
-	FVector MyLoc = AIChar->GetActorLocation();
-	FVector TargetLoc = TargetActor->GetActorLocation();
-	FVector DirToTarget = TargetLoc - MyLoc;
-	float DistToTarget = DirToTarget.Size();
-	UCharacterMovementComponent* MoveComp = AIChar->GetCharacterMovement();
+    if (!AIChar || !TargetActor)
+    {
+        FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+        return;
+    }
+    bool bTargetInAir = Blackboard->GetValueAsBool(FName("bIsTargetInAir"));
 
-	bool bTargetInAir = OwnerComp.GetBlackboardComponent()->GetValueAsBool(FName("bIsTargetInAir"));
-	
-	if (DirToTarget.Z > 200.0f) 
-	{
-		if (MoveComp->MovementMode != MOVE_Flying)
-		{
-			MoveComp->SetMovementMode(MOVE_Flying);
+    UCharacterMovementComponent* MoveComp = AIChar->GetCharacterMovement();
+    FVector MyLoc = AIChar->GetActorLocation();
+    FVector TargetLoc = TargetActor->GetActorLocation();
+    
+    // 방향 벡터 계산 (3D)
+    FVector DirToTarget = TargetLoc - MyLoc;
+    float DistToTarget = DirToTarget.Size();
+    FVector LookDir = DirToTarget.GetSafeNormal(); // 정규화된 방향 벡터
+    
+    // 타겟이 나보다 150cm 이상 위에 있거나, 이미 비행 중이라면 비행 모드 유지
+    bool bShouldFly = (DirToTarget.Z > 150.0f) || MoveComp->IsFlying();
+    
+    // 타겟이 바닥에 있고(공중 아님) 나도 바닥에 가까우면 걷기 모드
+    if (FMath::Abs(DirToTarget.Z) < 50.0f && !bTargetInAir) 
+    {
+        bShouldFly = false;
+    }
+
+    // 이동 모드 전환 (매 프레임 체크하되, 조건 만족 시 확실하게 전환)
+    if (bShouldFly)
+    {
+        if (MoveComp->MovementMode != MOVE_Flying)
+        {
+            MoveComp->SetMovementMode(MOVE_Flying);
+        }
+    }
+    else
+    {
+        if (MoveComp->MovementMode != MOVE_Walking && MoveComp->MovementMode != MOVE_Falling)
+        {
+            MoveComp->SetMovementMode(MOVE_Walking);
+        }
+    }
+    
+    // Flying 모드일 때는 Z축이 포함된 LookDir를 그대로 넣어야 위로 올라갑니다.
+    // Walking 모드일 때는 어차피 Z축이 무시되므로 동일하게 넣어도 됩니다.
+    AIChar->AddMovementInput(LookDir, 1.0f);
+
+    // 회전 처리 (부드럽게 타겟 바라보기)
+    FRotator TargetRot = LookDir.Rotation();
+    FRotator CurrentRot = AIChar->GetActorRotation();
+    
+    // RInterpTo를 사용하여 부드럽게 회전 (속도 10.0f 조절 가능)
+    FRotator SmoothRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaSeconds, 10.0f);
+    
+    // 비행 중일 때는 위아래(Pitch)도 회전해야 자연스러움
+    if (bShouldFly)
+    {
+        AIC->SetControlRotation(SmoothRot); // 컨트롤러 회전 동기화
+        AIChar->SetActorRotation(SmoothRot); // 액터 회전 적용
+    }
+    else
+    {
+        FRotator GroundRot = FRotator(0, SmoothRot.Yaw, 0);
+        AIChar->SetActorRotation(GroundRot);
+        AIC->SetFocus(TargetActor);
         
-			// 바닥에서 강제로 떼어내기 (위로 150만큼 상승)
-			AIChar->LaunchCharacter(FVector(0, 0, 150.0f), false, true);
-		}
-	}
-	
-	if (bTargetInAir)
-	{
-		if (MoveComp->MovementMode == MOVE_Flying)
-		{
-			// 공중일 때는 기존처럼 직선 추격
-			MoveComp->SetMovementMode(MOVE_Flying);
-		}
-		
-		FVector Dir = TargetLoc - MyLoc;
-		AIChar->AddMovementInput(Dir.GetSafeNormal(), 1.0f);
-	}
-	else if (FMath::Abs(DirToTarget.Z) < 100.0f && MoveComp->MovementMode == MOVE_Flying)
-	{
-		FHitResult Hit;
-		FVector Start = AIChar->GetActorLocation();
-		FVector End = Start - FVector(0, 0, 200.0f); // 발 밑 200cm 확인
-		FCollisionQueryParams Params;
-		Params.AddIgnoredActor(AIChar);
+    }
 
-		// 발 밑에 땅이 있는지 체크
-		bool bGroundFound = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
-
-		if (bGroundFound)
-		{
-			MoveComp->SetMovementMode(MOVE_Walking);
-		}
-		else
-		{
-			// 땅이 없으면 비행 유지
-		}
-	}
-	// else
-	// {
-	// 	if (MoveComp->MovementMode == MOVE_Flying && !MoveComp->IsFalling())
-	// 	{
-	// 		MoveComp->SetMovementMode(MOVE_Walking);
-	// 	}
-	// 	// 지상일 때는 네비게이션 시스템에 "길"을 물어봅니다.
-	// 	UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
-	// 	UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(GetWorld(), MyLoc, TargetLoc);
-	//
-	// 	// 갈 수 있는 길(PathPoints)이 있고 장애물이 있다면
-	// 	if (NavPath && NavPath->PathPoints.Num() > 1)
-	// 	{
-	// 		// 바로 다음 길목(Index 1)을 향해 방향 벡터를 설정합니다.
-	// 		DirToTarget = NavPath->PathPoints[1] - MyLoc;
-	// 	}
-	// 	else
-	// 	{
-	// 		// 길이 없으면 직선으로 시도
-	// 		DirToTarget = TargetLoc - MyLoc;
-	// 	}
-	// }
-	
-	FVector FinalDir = DirToTarget.GetSafeNormal(); 
-	AIChar->AddMovementInput(FinalDir, 1.0f);
-	
-	//TODO 개선해야 할것.
-	// 타겟이 나보다 높이 있으면 -> 비행 모드 전환
-	// 플레이어의 상태를 읽어와서 전환할 필요가 있음
-	// 높이 값으로 하니 정밀하지 않음.
-	// 내가 부스트 상태면 동일하게 부스트 상태로 전환해 플레이어를 추적해야하며
-	// 점프 또는 공중 상태일때는 동일한 모션 모드로 전환할 필요가 있음.
-	if (FMath::Abs(DirToTarget.Z) > 200.0f) 
-	{
-		if (MoveComp->MovementMode != MOVE_Flying)
-		{
-			MoveComp->SetMovementMode(MOVE_Flying);
-		}
-	}
-	
-	else if (FMath::Abs(DirToTarget.Z) < 100.0f && MoveComp->MovementMode == MOVE_Flying)
-	{
-		MoveComp->SetMovementMode(MOVE_Walking);
-	}
-	
-	if (DistToTarget > 1000.0f)
-	{
-		// 거리가 멀면 부스트 상태로 전환하여 빠르게 접근
-		AIChar->SetAICombatState(EGundamAICombatState::Boosting);
-	}
-	
-	// 사거리 안에 들어왔으면 종료
-	if (DistToTarget <= AcceptanceRadius)
-	{
-		MoveComp->StopMovementImmediately();
-		FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
-		return;
-	}
-
-	FVector MoveDir = DirToTarget.GetSafeNormal();
-	AIChar->AddMovementInput(MoveDir, 1.0f);
-
-	DirToTarget.Normalize(); // 방향만 남기고 정규화
-    
-	// AI 입력
-	AIChar->AddMovementInput(DirToTarget, 1.0f);
-	
-	// AI의 시선을 플레이어를 향하도록
-	AIController->SetFocus(TargetActor);
-	
-	{
-		DrawDebugLine(GetWorld(), MyLoc, TargetLoc, FColor::Red, false, -1.0f, 0, 2.0f);
-	}
+    // 거리 체크 및 종료
+    if (DistToTarget <= AcceptanceRadius)
+    {
+        MoveComp->StopMovementImmediately();
+        FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+    }
 }

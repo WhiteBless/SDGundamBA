@@ -6,6 +6,7 @@ public class SDGundamBA : ModuleRules
 {
 	public SDGundamBA(ReadOnlyTargetRules Target) : base(Target)
 	{
+		PrivateDependencyModuleNames.AddRange(new string[] { "Niagara" });
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(new string[] {
@@ -20,10 +21,9 @@ public class SDGundamBA : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
-			"MotionWarping"
+			"MotionWarping",
+			"Niagara"
 		});
-
-		PrivateDependencyModuleNames.AddRange(new string[] { "OpenCV" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SDGundamBA",

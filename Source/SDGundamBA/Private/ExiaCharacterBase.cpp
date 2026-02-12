@@ -14,8 +14,12 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "MotionWarpingComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraComponent.h"
 #include "InputAction.h"
 #include "DrawDebugHelpers.h"
+#include "ExiaAICharacter.h"
+#include "ExiaPlayerCharacter.h"
+#include "NiagaraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/DataTable.h"
 #include "SDGundamBA.h"
@@ -23,7 +27,9 @@
 #include "AI/Public/GundamAIController.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Particles/ParticleSystemComponent.h"
 
 // Sets default values
 AExiaCharacterBase::AExiaCharacterBase()
@@ -32,6 +38,12 @@ AExiaCharacterBase::AExiaCharacterBase()
 	GuardCooldownTime = 2.0f;
 	
 	PrimaryActorTick.bCanEverTick = true;
+	
+	// 부스터 컴포넌트 관련
+	ThrusterFXComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("ThrusterBoostFX"));
+	ThrusterFXComponent->SetupAttachment(GetMesh(), FName("Th_Vernier_BackThruster_Socket"));
+	ThrusterFXComponent->SetAutoActivate(false); // 시작할 때 꺼두기
+	ThrusterFXComponent->SetHiddenInGame(true);
 	
 	// SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	// SpringArmComp->SetupAttachment(RootComponent);
@@ -72,6 +84,7 @@ void AExiaCharacterBase::BeginPlay()
 	LoadCharacterData();
 	
 	bIsDeath = false;
+	
 	
 	//가드 콜리전
 	if (GuardCollision)
@@ -292,44 +305,40 @@ void AExiaCharacterBase::PlayDeathExplosion()
 	if (GuardShieldMesh) GuardShieldMesh->SetHiddenInGame(true);
 	
 	//게임 모드에 전달
-	ASDGundamBAGameMode* GM = Cast<ASDGundamBAGameMode>(GetWorld()->GetAuthGameMode());
-	if (GM)
+	if (ASDGundamBAGameMode* GM = Cast<ASDGundamBAGameMode>(GetWorld()->GetAuthGameMode()))
 	{
-		if (IsPlayerControlled())
+		bool bIsVictory = !IsPlayerControlled();
+		if (GM)
 		{
-			// 플레이어 사망 -> 패배 UI 출력
-			GM->EndMission(false); 
-		}
-		else if (ActorHasTag("Enemy"))
-		{
-			// 보스 사망 -> 승리 UI 출력
-			GM->EndMission(true);
+			
+			GM->EndMission(bIsVictory);
+			
+			// if (IsPlayerControlled())
+			// {
+			// 	// 플레이어 사망 -> 패배 UI 출력
+			// 	GM->EndMission(false); 
+			// }
+			// else if (ActorHasTag("Enemy"))
+			// {
+			// 	// 보스 사망 -> 승리 UI 출력
+			// 	GM->EndMission(true);
+			// }
 		}
 	}
-	
 	SetLifeSpan(0.1f);
 }
 
 void AExiaCharacterBase::OnDeath()
 {
-
-	GetCharacterMovement()->DisableMovement();
-	if (GetController()) GetController()->StopMovement();
-	
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	
-	bIsAttacking = false;
-	bBlock = false;
-	bIsJumping = false;
-	bIsBoosting = false;
-	bIsDeath = true;
-	
-	if (DeathMontage)
+	if (bIsDeath)
 	{
-		DeathMontagePlay();
+		if (DeathMontage)
+		{
+			DeathMontagePlay();
 		
-		// 폭발 이펙트 타이머
-		GetWorldTimerManager().SetTimer(DeathTimerHandle, this, &AExiaCharacterBase::PlayDeathExplosion, 3.0f, false);
+			// 폭발 이펙트 타이머
+			GetWorld()->GetTimerManager().SetTimer(DeathTimerHandle, this, &AExiaCharacterBase::PlayDeathExplosion, 3.0f, false);
+		}
 	}
 }
 
@@ -338,13 +347,6 @@ void AExiaCharacterBase::DeathMontagePlay()
 	if (bIsDeath)
 	{
 		PlayAnimMontage(DeathMontage, 1.0f, DeathLoopSectionName);
-		
-		// UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-		// if (AnimInstance)
-		// {
-		// 	
-		// 	AnimInstance->Montage_JumpToSection(DeathLoopSectionName, DeathMontage);
-		// }
 	}
 }
 
@@ -564,16 +566,34 @@ void AExiaCharacterBase::RegenerateGuardHP(float DeltaTime)
 void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AActor* Attacker, FName HitBoneName, FVector HitLocation)
 {
 	UE_LOG(LogTemp, Error, TEXT("DAMAGE RECEIVED! Amount: %f"), DamageAmount);
-	
-	if (CurrentHP <= 0.0f) return;
+	if (bIsDeath) return;
+	if (CurrentHP <= 0) return;
 	
 	// 방어력을 적용한 실제 데미지 계산
 	float ActualDamage = FMath::Max(DamageAmount - DefensePower, 1.0f);	
 	
 	ShowDamageText(ActualDamage, HitLocation);
 	
-	// 피격 상태 판별 (스턴 > 가드 > 일반 피격 순서)
-    
+	if (!IsPlayerControlled()) // 내가 AI라면
+	{
+		if (AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(this))
+		{
+			// 아직 전투 상태가 아니라면 전투 상태로 변경
+			if (AIChar->AICombatState != EGundamAICombatState::Combat)
+			{
+				AIChar->SetAICombatState(EGundamAICombatState::Combat);
+			}
+
+			// 때린 사람을 블랙보드의 타겟으로 즉시 지정 (반격 준비)
+			if (AAIController* AIC = Cast<AAIController>(GetController()))
+			{
+				if (AIC->GetBlackboardComponent())
+				{
+					AIC->GetBlackboardComponent()->SetValueAsObject(TEXT("TargetActor"), Attacker);
+				}
+			}
+		}
+	}
 	// 경직(Stun) 상태: 가드 불가, 100% 데미지
 	if (bIsStunned)
 	{
@@ -601,12 +621,41 @@ void AExiaCharacterBase::ApplyGundamDamage_Implementation(float DamageAmount, AA
 		CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
 	UE_LOG(LogTemp, Warning, TEXT("Hit! Damage: %f | Left HP: %f"), ActualDamage, CurrentHP);
 	}
-
+	
 	// 사망 판정
 	if (CurrentHP <= 0.0f)
 	{
+		// 0이하 [-]음수 값으로 떨어지지 않게
 		CurrentHP = 0.0f;
+		
+		// 사망 상태로 상태 변경
+		bIsDeath = true;
+		
+		// 기존 상태 해제
+		bIsAttacking = false;
+		bBlock = false;
+		bIsJumping = false;
+		bIsBoosting = false;
+
+		if (AAIController* AIC = Cast<AAIController>(GetController()))
+		{
+			AIC->StopMovement(); // AI 이동 정지
+			AIC->GetBrainComponent()->StopLogic("Dead"); // AI 생각 정지
+		}
+		else if (APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			DisableInput(PC); // 플레이어 입력 정지
+		}
+		
 		UE_LOG(LogTemp, Error, TEXT("%s Destroyed!"), *GetName());
+		
+		DisableInput(Cast<APlayerController>(GetController()));
+		
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		
+		UE_LOG(LogTemp, Error, TEXT("[%s] Character DIED!"), *GetName());
+		
 		OnDeath();
 		
 		return;
@@ -633,9 +682,6 @@ void AExiaCharacterBase::OnGuardOverlap(UPrimitiveComponent* OverlappedComp, AAc
 {
 	if (OtherActor && OtherActor != this)
 	{
-		// 1. 부딪힌 액터가 투사체(미사일 등)인지 확인 (인터페이스나 클래스 체크)
-		// 2. 투사체라면 폭발 이펙트를 이 위치(SweepResult.ImpactPoint)에서 재생
-		// 3. 본체에 전달될 대미지를 가드 대미지로 변환하여 적용
 		UE_LOG(LogTemp, Warning, TEXT("Projectile Blocked by Shield Collision!"));	
 	}
 	
@@ -949,6 +995,66 @@ void AExiaCharacterBase::StopFlying()
 	GetCharacterMovement()->BrakingDecelerationFalling = 0.0f;
 }
 
+void AExiaCharacterBase::UpdateThrusterEffect()
+{
+	if (!ThrusterFXComponent || !ThrusterFXComponent->GetAsset()) return;
+
+	bool bShouldActivate = false;
+	float CurrentSpeed = GetVelocity().Size();
+	
+	if (bBlock || bIsFlying || bIsBoosting || bIsJumpBoosting || bIsJumping || GetCharacterMovement()->IsFalling())
+	{
+		bShouldActivate = true;
+		
+	}
+
+	
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance)
+	{
+		if (AnimInstance->Montage_IsPlaying(AttackMontage))
+		{
+			bShouldActivate = true;
+		}
+	}
+	// AI 추적 중
+	else if (!IsPlayerControlled()) 
+	{
+		if (AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(this))
+		{
+			if (AIChar->AICombatState == EGundamAICombatState::Combat && CurrentSpeed > 10.0f)
+			{
+				bShouldActivate = true;
+			}
+		}
+	}
+	
+	if (bIsStunned || bIsDeath)
+	{
+		bShouldActivate = false;
+	}
+	
+	bool bIsCurrentlyVisible = !ThrusterFXComponent->bHiddenInGame;
+
+	if (bShouldActivate != bIsCurrentlyVisible)
+	{
+		ThrusterFXComponent->SetHiddenInGame(!bShouldActivate);
+
+		if (bShouldActivate)
+		{
+			ThrusterFXComponent->Activate(true);
+			
+			//TODO 부스트 사운드 넣는 공간
+		}
+		else
+		{
+			ThrusterFXComponent->Deactivate();
+			
+			//TODO 사운드 끄기
+		}
+	}
+}
+
 // 체력 퍼센트 반환
 float AExiaCharacterBase::GetHPPercent_Implementation() const
 {
@@ -1038,6 +1144,8 @@ void AExiaCharacterBase::Tick(float DeltaTime)
 		GetCharacterMovement()->AirControl = 0.35f;
 		GetCharacterMovement()->BrakingDecelerationFalling = 1000.0f;
 	}
+	
+	UpdateThrusterEffect();
 }
 
 // Called to bind functionality to input

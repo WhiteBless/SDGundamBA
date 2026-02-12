@@ -9,12 +9,26 @@
 UENUM(BlueprintType)
 enum class EGundamAICombatState : uint8
 {
-	Waiting     UMETA(DisplayName = "Waiting"),   // 새로운 대기 상태 추가
+	Idle        UMETA(DisplayName = "Idle"),	  // 대기
+	Patrol      UMETA(DisplayName = "Patrol"),
+	Waiting     UMETA(DisplayName = "Waiting"),   // 기다리기
 	Jumping     UMETA(DisplayName = "Jumping"),	  // 점프
 	Boosting    UMETA(DisplayName = "Boosting"),  // 부스트 상태
+	Evading     UMETA(DisplayName = "Evading"),	  // 회피
 	Exploring   UMETA(DisplayName = "Exploring"), // 순찰/이동
+	Flying      UMETA(DisplayName = "Flying"),	  // 공중
 	Combat      UMETA(DisplayName = "Combat")     // 전투 중
 };
+
+namespace BB_Keys
+{
+	const FName TargetActor = FName("TargetActor");
+	const FName TargetDistance = FName("TargetDistance");
+	const FName AICombatState = FName("AICombatState");  
+	const FName SuggestedEvade = FName("bSuggestedEvade");
+	const FName SuggestedGuard = FName("bSuggestedGuard");
+}
+
 /**
  * 엑시아 및 모든 기체의 공통 스탯 구조체를 설계하는 공간
  */

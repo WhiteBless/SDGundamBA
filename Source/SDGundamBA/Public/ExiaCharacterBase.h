@@ -15,6 +15,7 @@ enum class EGundamCombatState : uint8
 	Combat		UMETA(DisplayName = "Combat")
 };
 
+
 UCLASS()
 class SDGUNDAMBA_API AExiaCharacterBase : public ACharacter, public IGundamCombatInterface, public IGundamStateInterface
 {
@@ -410,9 +411,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Gundam | Combat")
 	void CheckNextCombo();
 
+	UFUNCTION(BlueprintCallable, Category = "Stat")
+	float GetMoveSpeed() const { return CurrentStat.MoveSpeed; }
+	
 protected:
 	// 공격 입력이 들어왔었는지 저장하는 플래그
 	bool bHasSavedComboInput;
+	
+	// 부스터 이펙트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UNiagaraComponent* ThrusterFXComponent;
+
+	// [추가] 매 프레임 이펙트 상태를 갱신하는 함수
+	void UpdateThrusterEffect();
 	
 public:
 	// 인터페이스 구현
