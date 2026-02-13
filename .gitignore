@@ -72,3 +72,6 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# ModularSciFi 폴더 전체 제외
+!SDGundamBA/Content/ModularSciFi/
