@@ -21,7 +21,21 @@ EBTNodeResult::Type UBTTask_Evade::ExecuteTask(UBehaviorTreeComponent& OwnerComp
 	if (!AIChar) return EBTNodeResult::Failed;
 	
 	AIChar->SetAICombatState(EGundamAICombatState::Boosting);
-
+	
+	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
+	AActor* Target = Cast<AActor>(BB->GetValueAsObject(FName("TargetActor")));
+	
+	if (Target)
+	{
+		AIC->SetFocus(Target); // 시선 고정
+        
+		// [옵션] 만약 즉시 몸을 돌리고 싶다면 강제 회전 코드 추가
+		FVector Dir = Target->GetActorLocation() - AIC->GetPawn()->GetActorLocation();
+		FRotator LookRot = Dir.Rotation();
+		LookRot.Pitch = 0.0f;
+		AIC->GetPawn()->SetActorRotation(LookRot);
+	}
+	
 	//랜덤 방향 결정 (좌 / 우 / 후방)
 	FVector Forward = AIChar->GetActorForwardVector();
 	FVector Right = AIChar->GetActorRightVector();

@@ -27,7 +27,7 @@ protected:
 public:
 	// 목표와 얼마나 가까워지면 추적을 멈출지 거리에 대한 정의
 	UPROPERTY(EditAnywhere, Category = "AI")
-	float AcceptanceRadius = 300.0f;
+	float AcceptanceRadius = 250.0f;
 	
 	UPROPERTY(EditAnywhere, Category = "AI")
 	bool bDebugLines = false;

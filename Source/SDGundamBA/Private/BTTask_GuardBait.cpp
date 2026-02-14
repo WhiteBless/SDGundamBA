@@ -26,16 +26,28 @@ EBTNodeResult::Type UBTTask_GuardBait::ExecuteTask(UBehaviorTreeComponent& Owner
 
 void UBTTask_GuardBait::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
+	AAIController* AIC = OwnerComp.GetAIOwner();
 	AExiaAICharacter* AIChar = Cast<AExiaAICharacter>(OwnerComp.GetAIOwner()->GetPawn());
+	
 	if (!AIChar) 
 	{
 		FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 		return;
 	}
 
+	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
+	if (BB)
+	{
+		AActor* Target = Cast<AActor>(BB->GetValueAsObject(FName("TargetActor")));
+		if (Target)
+		{
+			// 컨트롤러가 타겟을 바라보도록 설정 (몸통 회전은 캐릭터 세팅에 따라감)
+			AIC->SetFocus(Target);
+		}
+	}
+	
 	ElapsedTime += DeltaSeconds;
-
-	// 조건 1: 시간이 다 되었으면 가드 풀고 종료
+	
 	if (ElapsedTime >= WaitTime)
 	{
 		AIChar->StopGuard();

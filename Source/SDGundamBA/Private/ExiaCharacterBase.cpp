@@ -1221,7 +1221,7 @@ void AExiaCharacterBase::JumpBoosting()
 		float DeltaTime = GetWorld()->GetDeltaSeconds();
 		ConsumeGNParticles(DeltaTime); 
 		
-		GetCharacterMovement()->MaxAcceleration = 6000.0f;
+		GetCharacterMovement()->MaxAcceleration = 5000.0f;
 	}
 }
 
@@ -1268,7 +1268,7 @@ void AExiaCharacterBase::StartJumpDash()
 		bIsJumpBoosting = true;
 		
 		GetCharacterMovement()->GravityScale = DefaultGravityScale - 2.5f;
-		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 1.5);
+		GetCharacterMovement()->MaxFlySpeed = CurrentStat.MoveSpeed * (BoostSpeedMultiplier * 2);
 	}
 }
 
@@ -1297,9 +1297,8 @@ void AExiaCharacterBase::StartBoost()
 	FVector LaunchDir = GetLastMovementInputVector().GetSafeNormal();
 	GetCharacterMovement()->RotationRate = FRotator(0,0,0);
 	GetCharacterMovement()->MaxWalkSpeed = CurrentStat.MoveSpeed * BoostSpeedMultiplier;
+	GetCharacterMovement()->MaxAcceleration = 5000.0f;
 	
-
-	// [짧게 누르기 대응] 즉각적인 반응 필요
 	if (GetCharacterMovement()->IsFalling())
 	{
 		LaunchCharacter(LaunchDir.GetSafeNormal() * 1000.0f, true, false);

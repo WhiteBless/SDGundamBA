@@ -28,4 +28,6 @@ public:
 	EGundamAICombatState AICombatState = EGundamAICombatState::Waiting;
 	
 	void SetAICombatState(EGundamAICombatState NewState);
+	
+	virtual void Tick(float DeltaTime) override;
 };

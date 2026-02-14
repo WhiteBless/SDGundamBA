@@ -18,11 +18,10 @@ UBehaviorTree* AExiaAICharacter::GetBehaviorTree() const
     return TreeAsset;
 }
 
-// ExiaAICharacter.cpp
-
 void AExiaAICharacter::SetAICombatState(EGundamAICombatState NewState)
 {
 	AICombatState = NewState;
+	float FinalMult = (CurrentStat.BoostSpeedMultiplier <= 0.1f) ? 1.5f : CurrentStat.BoostSpeedMultiplier;
 	
 	// 부모에 있는 변수를 강제로 AI 상태와 동기화
 	bIsBoosting = (AICombatState == EGundamAICombatState::Boosting);
@@ -38,22 +37,52 @@ void AExiaAICharacter::SetAICombatState(EGundamAICombatState NewState)
 
 		case EGundamAICombatState::Exploring:
 			Movement->MaxWalkSpeed = CurrentStat.MoveSpeed * 0.4f;
-			Movement->MaxAcceleration = 2048.0f;
+			Movement->MaxAcceleration = 1048.0f;
+
+			bUseControllerRotationYaw = false;
+			GetCharacterMovement()->bOrientRotationToMovement = true;
 			break;
 
 		case EGundamAICombatState::Combat:
 			Movement->MaxWalkSpeed = CurrentStat.MoveSpeed;
-			Movement->MaxAcceleration = 2048.0f;
+			Movement->MaxAcceleration = 1048.0f;
 			break;
 
 		case EGundamAICombatState::Boosting:
-			Movement->MaxWalkSpeed = CurrentStat.BoostSpeedMultiplier; 
-			Movement->MaxAcceleration = 20000.0f; 
+			Movement->MaxWalkSpeed = CurrentStat.MoveSpeed * FinalMult;
+			Movement->MaxAcceleration = 3000.0f; 
 			break;
 			
 			
+		case EGundamAICombatState::Evading:
+			bUseControllerRotationYaw = true; 
+			GetCharacterMovement()->bOrientRotationToMovement = false;
+			break;
 		}
 		
 		Movement->MaxFlySpeed = Movement->MaxWalkSpeed;
+	}
+}
+
+void AExiaAICharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	
+	if (GetCharacterMovement())
+	{
+		if (GetCharacterMovement()->IsFlying() || GetCharacterMovement()->IsFalling())
+		{
+			if (!bIsFlying) 
+			{
+				bIsFlying = true;
+			}
+		}
+		else if (GetCharacterMovement()->IsWalking())
+		{
+			if (bIsFlying)
+			{
+				bIsFlying = false;
+			}
+		}
 	}
 }
