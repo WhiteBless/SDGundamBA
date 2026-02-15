@@ -20,8 +20,6 @@ public:
 protected:
 	// 태스크 실행 시작
 	virtual EBTNodeResult::Type ExecuteTask (UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
-	
-	// 매 프레임 실행 ( 실제 이동 로직 )
 	virtual void TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
 
 public:
