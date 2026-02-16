@@ -4,6 +4,48 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
+
+void ASDGundamBAGameMode::BeginPlay()
+{
+	Super::BeginPlay();
+	
+	FTimerHandle SpawnTimer;
+	GetWorldTimerManager().SetTimer(SpawnTimer, this, &ASDGundamBAGameMode::DelayedSpawn, 3.0f, false);
+}
+
+void ASDGundamBAGameMode::DelayedSpawn()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 1. 플레이어 스폰
+	if (PlayerClass)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		
+		ACharacter* NewPlayer = World->SpawnActor<ACharacter>(PlayerClass, PlayerSpawnPos, FRotator::ZeroRotator, Params);
+        
+		// 빙의 (Possess)
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			PC->Possess(NewPlayer);
+		}
+        
+		// 이펙트 재생
+		if (SpawnFX) UGameplayStatics::SpawnEmitterAtLocation(World, SpawnFX, PlayerSpawnPos);
+	}
+
+	// 2. AI 스폰
+	if (AIClass)
+	{
+		World->SpawnActor<ACharacter>(AIClass, AISpawnPos, FRotator(0, 180, 0));
+		if (SpawnFX) UGameplayStatics::SpawnEmitterAtLocation(World, SpawnFX, AISpawnPos);
+	}
+    
+	// 3. UI에 "GAME START" 띄우기 (옵션)
+}
 
 ASDGundamBAGameMode::ASDGundamBAGameMode()
 {
@@ -39,6 +81,6 @@ void ASDGundamBAGameMode::EndMission(bool bIsVictory)
 void ASDGundamBAGameMode::GameStop()
 {
 	//TODO 게임 스탑 조건문 들어가야함
-	//현재 안들어가 있음..!!
+	//현재 임시 동작 예외처리 안들어가 있음..!!
 	UGameplayStatics::SetGamePaused(GetWorld(), true);
 }

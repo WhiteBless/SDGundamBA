@@ -20,6 +20,34 @@ UCLASS()
 class SDGUNDAMBA_API AExiaCharacterBase : public ACharacter, public IGundamCombatInterface, public IGundamStateInterface
 {
 	GENERATED_BODY()
+public:
+	// [Sound] 파일명(String)으로 사운드 재생
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlaySoundByName(FString SoundName);
+
+	// [Combat] 원거리 공격 중인가? (AI 감지용)
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsRangedAttacking() const { return bIsRangedAttacking; }
+
+	// [Combat] 원거리 공격 상태 변경 (애니메이션 노티파이에서 호출)
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetRangedAttacking(bool bStatus) { bIsRangedAttacking = bStatus; }
+
+protected:
+	// [Audio] 사운드 저장소 (에디터에서 설정: "Attack" -> SoundCue)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Audio")
+	TMap<FString, USoundBase*> SoundLibrary;
+
+	// [Combat] 원거리 공격 상태 플래그
+	bool bIsRangedAttacking = false;
+
+	//TODO [Combat] 넉백 힘 (기본값 1200)
+	UPROPERTY(EditAnywhere, Category = "Combat")
+	float KnockbackStrength = 1200.0f;
+
+public:
+	// 데미지 처리 함수 오버라이드 (넉백 구현)
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 	
 protected:
 	// 콤보 섹션 이름 배열 (블루프린트의 ComboNames 대응) 

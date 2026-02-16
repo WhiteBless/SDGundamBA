@@ -54,12 +54,17 @@ void UBTService_CombatDecision::TickNode(UBehaviorTreeComponent& OwnerComp, uint
 	if (bIsPlayerAttacking && Dist < 400.0f)
 	{
 		float Dice = FMath::RandRange(0.0f, 100.0f);
-
-		if (Dice < EvadeChance)
+		float CurrentTime = GetWorld()->GetTimeSeconds();
+		if (CurrentTime - LastEvadeTime > 1.5f) 
 		{
-			BB->SetValueAsBool(TEXT("bSuggestedEvade"), true);
-			// 회피 상태로 변경
-			NewState = EGundamAICombatState::Evading;
+			if (Dice < EvadeChance)
+			{
+				BB->SetValueAsBool(TEXT("bSuggestedEvade"), true);
+				NewState = EGundamAICombatState::Evading;
+                 
+				// 회피 시간 갱신
+				LastEvadeTime = CurrentTime; 
+			}
 		}
 		else if (Dice < EvadeChance + GuardChance)
 		{

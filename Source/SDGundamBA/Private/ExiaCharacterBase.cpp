@@ -189,6 +189,47 @@ void AExiaCharacterBase::StopGuard()
 	GetWorld()->GetTimerManager().SetTimer(GuardCooldownTimer, this, &AExiaCharacterBase::ResetGuardCooldown, GuardCooldownTime, false);
 }
 
+void AExiaCharacterBase::PlaySoundByName(FString SoundName)
+{
+	if (SoundLibrary.Contains(SoundName))
+	{
+		USoundBase* SoundToPlay = *SoundLibrary.Find(SoundName);
+		if (SoundToPlay)
+		{
+			// 위치 기반 재생 (스테레오감을 위해)
+			UGameplayStatics::PlaySoundAtLocation(this, SoundToPlay, GetActorLocation());
+		}
+	}
+	else
+	{
+		// 디버깅용 로그 (파일명을 못 찾았을 때)
+		UE_LOG(LogTemp, Warning, TEXT("[Audio] Sound Name Not Found: %s"), *SoundName);
+	}
+}
+
+float AExiaCharacterBase::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+
+	// 데미지가 들어왔고, 때린 사람이 있다면
+	if (ActualDamage > 0.0f && DamageCauser)
+	{
+		// A. 피격 사운드 재생 ("Hit"라는 이름의 사운드)
+		PlaySoundByName("Hit");
+
+		// B. 넉백 로직 (슈퍼아머/트랜스암 상태가 아닐 때만)
+		if (!bBlock) 
+		{
+			// 공격자 -> 피해자 방향 벡터
+			FVector KnockbackDir = (GetActorLocation() - DamageCauser->GetActorLocation()).GetSafeNormal();
+			KnockbackDir.Z = 0.2f; // 살짝 위로 뜨게 (공중 콤보 가능)
+            
+			LaunchCharacter(KnockbackDir * KnockbackStrength, true, true);
+		}
+	}
+	return ActualDamage;
+}
+
 void AExiaCharacterBase::ExecuteAttack_Implementation()
 {
     // 상태 체크

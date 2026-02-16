@@ -19,6 +19,8 @@ public:
 protected:
 	virtual void TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
 
+	float LastEvadeTime = 0.0f;
+	
 	// 공격 사거리 (이 안으로 들어오면 칼질 시작)
 	UPROPERTY(EditAnywhere, Category = "AI")
 	float AttackRange = 300.0f;
